@@ -69,6 +69,9 @@ Close the Kinova Web App's Cartesian/joystick control (and any ROS driver) while
 
 ## Use
 
+**In the lab:** follow [sim2real/LAB_CHECKLIST.md](sim2real/LAB_CHECKLIST.md). It lists what's still open and how to check each item.
+
+
 See [sim2real/README.md](sim2real/README.md) for every command, the test order, the motions and the safety checks.
 In short:
 
