@@ -7,10 +7,8 @@ Writes <log>.png and <log>_summary.md next to the log and prints the summary.
 
 Per joint (drive logs):
 * RMS / max difference real - sim, and real - reference;
-* lag: the time shift that best aligns the real joint velocity with the simulated one
-  (positive = the real arm is late);
-* speed gain: real speed / sim speed while moving (1.0 = same; < 1 = the real joint follows
-  commands more slowly -> tune deploy.yaml control.speed_gain or the sim servo);
+* delay: time from a joint-speed command to the joint moving, real and sim (from positions);
+* speed per command: how fast the joint moves per unit commanded (1.00 = exactly as commanded);
 * hold error: mean |real - reference| while the reference is still;
 * torque: real (Kortex estimate) vs sim joint torque while holding still.
 """
@@ -33,15 +31,23 @@ def wrapd(a):
     return (np.asarray(a) + 180) % 360 - 180
 
 
-def lag_ms(a, b, dt, max_lag_s=0.4):
-    """Shift (ms) of b relative to a that maximises their correlation; + = b is late."""
-    a, b = a - a.mean(), b - b.mean()
-    if np.std(a) < 1e-6 or np.std(b) < 1e-6:
-        return np.nan
-    n = int(max_lag_s / dt)
-    lags = np.arange(-n, n + 1)
-    c = [np.dot(a[max(0, -k): len(a) - max(0, k)], b[max(0, k): len(b) - max(0, -k)]) for k in lags]
-    return 1000 * dt * lags[int(np.argmax(c))]
+def response(t, q, v_cmd, grid=0.005, max_lag_s=0.4):
+    """Delay (ms) from a joint-speed command to the joint actually moving, and the speed it reaches per unit
+    commanded (from POSITIONS on a uniform 5 ms grid: robust to irregular loop timing and to how a
+    simulator or Kortex reports velocity).  Lab 2026-11-17: real 65-85 ms, gain 1.00."""
+    g = np.arange(t[0], t[-1], grid)
+    if len(g) < 50 or np.abs(v_cmd).max() < 2.0:
+        return np.nan, np.nan
+    qg = np.interp(g, t, q)
+    vc = np.interp(g, t, v_cmd)
+    v = np.convolve(np.gradient(qg, g), np.ones(9) / 9, mode="same")
+    a, b = vc - vc.mean(), v - v.mean()
+    n = int(max_lag_s / grid)
+    c = [np.dot(a[max(0, -k): len(a) - max(0, k)], b[max(0, k): len(b) - max(0, -k)]) for k in range(-n, n + 1)]
+    delay = grid * (int(np.argmax(c)) - n)
+    mv = np.abs(vc) > 2.0
+    gain = float(np.dot(v[mv], vc[mv]) / np.dot(vc[mv], vc[mv])) if mv.sum() > 50 else np.nan
+    return 1000 * delay, gain
 
 
 def first_reach(t, x, start_idx, target, tol=0.1):
@@ -65,7 +71,6 @@ def drive_summary(D, meta):
     t = time_base(D, meta)
     dt = float(np.median(np.diff(t)))
     qr, qs, qref = (np.degrees(D[k]) for k in ("q_real", "q_sim", "q_ref"))
-    vr, vs = np.degrees(D["dq_real"]), np.degrees(D["dq_sim"])
     moving_ref = np.r_[np.abs(np.diff(qref, axis=0)).max(axis=1) > 1e-4, False]
     still = ~moving_ref
     for _ in range(int(0.3 / dt)):                     # only well after the reference stopped
@@ -73,16 +78,18 @@ def drive_summary(D, meta):
     rows = []
     for j in range(6):
         d_rs, d_rr = wrapd(qr[:, j] - qs[:, j]), wrapd(qr[:, j] - qref[:, j])
-        mv = np.abs(vs[:, j]) > 2.0
-        gain = (np.dot(vr[mv, j], vs[mv, j]) / np.dot(vs[mv, j], vs[mv, j])) if mv.sum() > 5 else np.nan
+        vcr = np.degrees(D["v_cmd_real"][:, j])
+        vcs = np.degrees(D["v_cmd_sim"][:, j]) if "v_cmd_sim" in D else vcr
+        delay_r, gain_r = response(t, qr[:, j], vcr)
+        delay_s, gain_s = response(t, qs[:, j], vcs)
         tr, ts = torque_sign(meta) * D["torque_real"][still, j], D["torque_sim"][still, j]
         rows.append({
             "joint": j + 1,
             "rms_real_minus_sim_deg": float(np.sqrt(np.mean(d_rs ** 2))),
             "max_real_minus_sim_deg": float(np.abs(d_rs).max()),
             "rms_real_minus_ref_deg": float(np.sqrt(np.mean(d_rr ** 2))),
-            "lag_real_vs_sim_ms": float(lag_ms(vs[:, j], vr[:, j], dt)),
-            "speed_gain_real_over_sim": float(gain),
+            "delay_cmd_to_real_ms": float(delay_r), "delay_cmd_to_sim_ms": float(delay_s),
+            "speed_real_per_cmd": float(gain_r), "speed_sim_per_cmd": float(gain_s),
             "hold_err_real_deg": float(np.abs(d_rr[still]).mean()) if still.any() else np.nan,
             "hold_err_sim_deg": float(np.abs(wrapd(qs[still, j] - qref[still, j])).mean()) if still.any() else np.nan,
             "hold_torque_real_Nm": float(tr.mean()) if len(tr) else np.nan,
@@ -120,11 +127,11 @@ def to_md(s, meta, log):
          f"Motion **{meta.get('motion')}** from **{meta.get('start')}**, arm = {meta.get('real')}, "
          f"speed scale {meta.get('speed_scale')}, command mode {meta.get('command_mode')}, {meta.get('rate_hz')} Hz.",
          f"Aborted: **{meta['aborted']}**" if meta.get("aborted") else "Completed without abort.", "",
-         "| Joint | RMS real−sim (°) | max real−sim (°) | RMS real−ref (°) | lag real vs sim (ms) | speed gain real/sim | "
+         "| Joint | RMS real−sim (°) | max real−sim (°) | RMS real−ref (°) | delay cmd→motion real / sim (ms) | speed per command real / sim | "
          "hold err real / sim (°) | hold torque real / sim (N·m) |", "|---|---|---|---|---|---|---|---|"]
     for r in s["joints"]:
         L.append(f"| {r['joint']} | {r['rms_real_minus_sim_deg']:.2f} | {r['max_real_minus_sim_deg']:.2f} | "
-                 f"{r['rms_real_minus_ref_deg']:.2f} | {r['lag_real_vs_sim_ms']:.0f} | {r['speed_gain_real_over_sim']:.2f} | "
+                 f"{r['rms_real_minus_ref_deg']:.2f} | {r['delay_cmd_to_real_ms']:.0f} / {r['delay_cmd_to_sim_ms']:.0f} | {r['speed_real_per_cmd']:.2f} / {r['speed_sim_per_cmd']:.2f} | "
                  f"{r['hold_err_real_deg']:.2f} / {r['hold_err_sim_deg']:.2f} | "
                  f"{r['hold_torque_real_Nm']:.2f} / {r['hold_torque_sim_Nm']:.2f} |")
     L += ["", f"* Tool pose reported by the arm vs sim FK of the same joints: median {s['tool_fk_error_mm']['median']:.1f} mm, "
@@ -134,8 +141,10 @@ def to_md(s, meta, log):
           f"work median {s['loop_ms']['median']:.1f} ms (read {s['loop_ms']['read_median']:.1f}, send "
           f"{s['loop_ms']['send_median']:.1f}), max {s['loop_ms']['max']:.1f} ms, {s['loop_ms']['overruns']} overruns",
           f"* Sim arm in contact with table / itself: {s['sim_contacts_steps']} steps", "",
-          "How to read it: lag > ~60 ms or speed gain outside 0.8–1.2 means the simulated servo "
-          "(configs/robot.yaml actuator gains, task.yaml latency randomisation) does not match the real joint. "
+          "How to read it: delay = time from a speed command to the joint moving (from positions, 5 ms grid); "
+          "speed per command 1.00 = the joint moves exactly as fast as commanded. Real and sim delays more than "
+          "~50 ms apart, or speeds outside 0.9–1.1, mean the simulated servo (configs/robot.yaml actuator gains, "
+          "task.yaml latency randomisation) doesn't match the real joint. "
           "A constant hold error on the real arm only is usually gravity sag or a gain the sim does not have. "
           "Tool-pose error > 5 mm means the kinematics or the tool transform differ (run fk-check)."]
     return "\n".join(L)

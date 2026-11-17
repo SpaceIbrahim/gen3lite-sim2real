@@ -1,6 +1,6 @@
 # Real-arm checklist: what to check while we have the arm
 
-**Already confirmed (2026-11-17):**
+**Already confirmed (2026-11-17, sessions 1–2):**
 * kinematics (0.00 mm), tool frame, Home pose, speed limits;
 * masses (gravity torque 1.0–1.1× sim) and the joint 3 limit.
 
@@ -19,7 +19,10 @@ a pen, and the cabinet.
 
 ---
 
-## A. Finish the motion tests (~20 min, no setup)
+## A. Finish the motion tests (~20 min, no setup): **DONE in session 2 (2026-11-17)**
+
+All passed in tracking mode, within 0.1–0.3° of the sim. Pull at full speed is refused by the acceleration
+check; 0.75 is the fastest allowed. Below for reference / re-runs after sim changes.
 
 Start at Home each time: `python3 -m sim2real.mirror goto home`.
 
@@ -41,12 +44,14 @@ Every report now also prints **read** and **send** times per tick. That shows wh
 The sim assumes the base sits on the table top, +x points to the 83.5 cm edge and +y to the 71 cm side. Use the
 arm itself as a measuring device. Jog with the Xbox controller or Web App and read the **tool pose** in the Web App.
 
-1. **Base frame direction:** jog +x in Cartesian mode. The gripper must move toward the 83.5 cm edge
-   ("front" in your sketch). Jog +y: it must move toward the 71 cm side.
+1. **Base frame direction:** +x toward the 83.5 cm edge is **confirmed** (session 2). Still to check: jog +y,
+   which must move toward the 71 cm side.
 2. **Table height relative to the base:** point the gripper straight down, close it, and lower it until the
    fingertips just touch the table.
-   * Expected tool z ≈ **+26 mm**: the fingertips are 26 mm beyond the tool frame (sheet section 2).
-   * A different value means a plate or spacer under the base, or a tilted base. Write down the difference.
+   * The robot sits on a mount of **about 5 cm**, so expect tool z ≈ **−24 mm**: +26 mm fingertip offset
+     (sheet section 2) minus the mount height.
+   * **Mount height = 26 mm − (the tool z you read).** That gives the exact value for pending change #9.
+   * Repeat at 2–3 places on the table (front, left, right) to check the base is level.
 3. **Table position:** put two tape marks on the table measured from the base centre, e.g. 40 cm straight ahead
    and 30 cm to the robot's left. Touch each with the fingertips.
    * Web App x and y should read about **(0.40, 0.00)** and **(0.00, 0.30)**.
@@ -62,7 +67,8 @@ the robot's right, facing the robot, overhanging the table edge by ~11 cm.
 2. Jog the gripper (open, level, pointing +x) until the handle bar sits centred between the finger pads, as if
    grasping. Read the tool pose.
    * Sim expects the tool frame at about **x 0.552, y −0.180, z 0.383 m**: the handle centre (0.5595, −0.180, 0.3825),
-     minus the 8 mm between the tool frame and the RL TCP.
+     minus the 8 mm between the tool frame and the RL TCP. **With the ~5 cm mount, expect z ≈ 0.333 m**: the cabinet
+     stands on the table, 5 cm below the base.
    * Differences tell you how far the real cabinet is from the sim's, and give the handle height.
 3. Close the gripper on the bar. Note the **gripper reading** in the Web App. The deploy code treats < 0.4 as
    "closed on something", and the sim's fingers stop at the 1.1 cm bar.
@@ -82,7 +88,7 @@ the robot's right, facing the robot, overhanging the table edge by ~11 cm.
 * **Speed modes:** the lab run used `GRIPPER_POSITION` (default speed). Note whether the Web App gripper speed
   setting changes the 2.2 s close time. If there's a faster setting, we can use it instead of slowing the sim.
 
-## E. Workspace and obstacles (~5 min)
+## E. Workspace and obstacles (~5 min): only the laptop, which can be moved (session 2)
 
 Run `python3 -m sim2real.mirror follow --viewer` and slowly sweep the gripper through the drawer region:
 from `rl_start` to the handle, then 15 cm back toward the robot.
