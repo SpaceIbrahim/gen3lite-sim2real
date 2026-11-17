@@ -47,6 +47,9 @@ class SimArm:
         e.reset(seed=0)
         if not cabinet:                    # move the cabinet well out of the way (real tests without it)
             e.set_drawer_offset(np.array([0.0, 5.0, 0.0]), 0.0)
+        else:                              # nominal placement from scene.yaml (reset samples a random one)
+            e.set_drawer_offset(np.zeros(3), 0.0)
+        mujoco.mj_forward(e.model, e.data)
         self.m, self.d = e.model, e.data
         self.dt = e.dt
         self.q_limits = e.q_limits.copy()                       # what the controller may command
