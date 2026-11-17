@@ -163,6 +163,12 @@ class DrawerEnv(gym.Env):
             "biasprm": m.actuator_biasprm[self.arm_act].copy(),
             "grip_force": m.actuator_forcerange[self.grip_act].copy(),
         }
+        # Rail friction that grows with the sideways/vertical load on the handle (audit recommendation 2):
+        # a real drawer jams when it is pulled crooked, so wedging the handle must cost pulling force.
+        # 0 = rigid, load-independent slide (v1-v7).
+        self.side_load_mu = float(self.cfg["drawer"]["top_drawer"]["slide"].get("side_load_friction", 0.0))
+        self._slide_fric_ep = float(m.dof_frictionloss[self.drawer_dadr])
+        self._side_force = 0.0
         self._renderer = None
         self._viewer = None
         self.placement_map = None
@@ -323,6 +329,7 @@ class DrawerEnv(gym.Env):
         self.set_drawer_offset(off, yaw)
         m.dof_damping[self.drawer_dadr] = self._nom["slide_damp"] * rng.uniform(*r["slide_damping_scale"])
         m.dof_frictionloss[self.drawer_dadr] = self._nom["slide_fric"] * rng.uniform(*r["slide_friction_scale"])
+        self._slide_fric_ep = float(m.dof_frictionloss[self.drawer_dadr])
         m.geom_friction[list(self.handle_geoms)] = self._nom["handle_fric"] * rng.uniform(*r["handle_friction_scale"])
         s = rng.uniform(*r["actuator_kp_scale"])
         m.actuator_gainprm[self.arm_act, 0] = self._nom["gainprm"][:, 0] * s
@@ -363,6 +370,9 @@ class DrawerEnv(gym.Env):
         self._action_queue = [np.zeros(self.action_space.shape, np.float32)] * self.action_delay
         self.prev_opening = self._opening()
         self.prev_tcp = self.tcp.pos(d).copy()
+        self._side_force = 0.0
+        if self.side_load_mu:
+            self.model.dof_frictionloss[self.drawer_dadr] = self._slide_fric_ep
         self.steps = 0
         self.success_count = 0
         self.succeeded = False          # latched once the drawer was held open long enough
@@ -382,6 +392,8 @@ class DrawerEnv(gym.Env):
         # chosen now is executed `action_delay` steps later
         self._action_queue.append(a)
         self._apply_action(self._action_queue.pop(0))
+        if self.side_load_mu:      # rail friction from last step's sideways handle load
+            self.model.dof_frictionloss[self.drawer_dadr] = self._slide_fric_ep + self.side_load_mu * self._side_force
         try:
             for _ in range(self.n_substeps):
                 mujoco.mj_step(self.model, self.data)
@@ -391,6 +403,7 @@ class DrawerEnv(gym.Env):
         unstable = not np.all(np.isfinite(self.data.qpos))
 
         state = self._task_state(a, self.last_action)
+        self._side_force = state["handle_force_perp"]
         reward, terms = self.reward_fn(state)
         ep = self.tc["episode"]
         opened = state["opening"] >= ep["success_opening"]

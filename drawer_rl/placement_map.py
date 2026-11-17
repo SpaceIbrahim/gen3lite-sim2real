@@ -23,18 +23,26 @@ def _fingerprint(cfg: dict) -> dict:
     """The settings a map depends on -- if any change, the map must be rebuilt."""
     return {
         "drawer_placement": cfg["scene"]["drawer_placement"],
-        "table": {k: cfg["scene"]["table"].get(k, 0.0) for k in ("height", "size", "robot_offset_on_table",
-                                                                   "max_cabinet_overhang")},
+        # optional keys only when set, so maps built before they existed still match their own configs
+        "table": {k: cfg["scene"]["table"][k] for k in ("height", "size", "robot_offset_on_table",
+                                                         "max_cabinet_overhang", "robot_mount_height")
+                  if k in cfg["scene"]["table"]},
         "tcp_offset": list(cfg["robot"]["tcp"]["offset"]),
         "start_tcp_pos": cfg["robot"].get("start_tcp_pos"),
         "start_qpos": cfg["robot"].get("start_qpos"),
         "success_opening": cfg["task"]["episode"]["success_opening"],
+        **({"max_steps": cfg["task"]["episode"]["max_steps"]} if cfg["task"]["control"].get("actuation") else {}),
         "handle": cfg["drawer"]["handle"]["offset_z"],
         "cabinet_height": cfg["drawer"]["cabinet"]["height"],
         # controller speed limits change what the arm can do in time (audit follow-up: with the
         # joint speed cap the far + clockwise corner was no longer openable)
         "ee_max_step": cfg["task"]["control"]["ee_max_step"],
         "joint_max_speed": cfg["task"]["control"].get("joint_max_speed"),
+        # v8 actuation model (velocity commands with acceleration limits, slower gripper)
+        **{k: cfg["task"]["control"][k] for k in ("actuation", "joint_max_accel", "velocity_kp", "gripper_max_speed")
+           if k in cfg["task"]["control"]},
+        **({"side_load_friction": cfg["drawer"]["top_drawer"]["slide"]["side_load_friction"]}
+           if "side_load_friction" in cfg["drawer"]["top_drawer"]["slide"] else {}),
     }
 
 
