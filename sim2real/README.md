@@ -8,7 +8,7 @@ the same MJCF, actuator overrides, table and controller time constants as traini
 | `info` | no | Limits, tool configuration and arm state as the arm reports them, compared with the sim |
 | `fk-check` | **no** | Kortex's own forward kinematics vs the sim's, at ~30 joint configurations. Finds joint zero/direction mismatches and tool-frame differences |
 | `follow` | you jog it (Xbox / Web App) | The sim copies the measured joints live. It warns when the sim arm would hit the table, the cabinet or itself, or get near a joint limit, and logs the tool-pose error plus real vs sim gravity torque |
-| `goto <pose>` | yes (Kortex planner) | Moves to `home`, `rl_start` or `zero` after checking the path in sim, then prints the tool pose to compare with the sheet |
+| `goto <pose>` | yes (Kortex planner) | Moves to `home` (the arm's stored Home action, like the lab demo), `rl_start` or `zero` after checking the path in sim. Prints the tool pose to compare with the sheet, and for Home also how far it is from the sim's home |
 | `drive <motion>` | yes (joint speeds) | Sends the **same** commands to both arms and logs both. Shows lag, speed gain, tracking, sag, gripper timing and torque differences |
 
 `python -m sim2real.report <log>.npz` turns a `drive` or `follow` log into plots and a summary table.
@@ -26,8 +26,11 @@ no sudo or virtualenv needed. Full steps are in the exported README ([STANDALONE
 pip3 install --user -r requirements.txt
 pip3 install --user kortex_api-*.whl              # the wheel from github.com/Kinovarobotics/kortex
 pip3 install --user "protobuf==3.20.3"            # Kortex needs protobuf 3.x
-export KINOVA_USERNAME=admin KINOVA_PASSWORD=...  # never written to any file
 ```
+
+Connecting works like the lab's `kinova/manual/demo.py`: same `DeviceConnection` helper
+([kortex_utilities.py](kortex_utilities.py)), with `--ip`, `-u` and `-p` arguments that default to `admin` / `admin`.
+Put them before the command: `python3 -m sim2real.mirror -u admin -p <password> info`.
 
 The arm's address is `robot.ip` in [mirror.yaml](mirror.yaml): `192.168.1.10` over USB, otherwise the Ethernet IP.
 Run everything from the repo root: `python3 -m sim2real.mirror ...`. (On this training machine, the training venv
@@ -99,7 +102,8 @@ capped at `safety.max_joint_speed_deg_s`.
 ## Files
 
 * `sim_arm.py`: the simulated arm (kinematic and dynamic use)
-* `real_arm.py`: `KortexArm` (Kortex API) and `FakeArm` (dry-run stand-in)
+* `real_arm.py`: `KortexArm` (Kortex API, written like the lab demo.py) and `FakeArm` (dry-run stand-in)
+* `kortex_utilities.py`: the lab's `DeviceConnection` helper
 * `trajectories.py`: test motions and the sim pre-check
 * `mirror.py`: the CLI
 * `report.py`: plots and summary

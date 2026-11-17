@@ -2,9 +2,7 @@
 
 robot:
   ip: 192.168.1.10          # Gen3 Lite over USB (RNDIS) is 192.168.1.10; over Ethernet use the arm's own IP
-  port: 10000
-  username_env: KINOVA_USERNAME   # the login is read from these environment variables, never from a file
-  password_env: KINOVA_PASSWORD
+                            # (or pass --ip).  Login: -u / -p on the command line, default admin / admin.
 
 sim:
   cabinet: false            # true = keep the drawer cabinet in the simulated world (contacts get reported)
