@@ -1,0 +1,743 @@
+{
+ "kinematic_chain_at_zero": [
+  {
+   "point": "base (table surface)",
+   "pos_mm": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "from_previous_mm": null
+  },
+  {
+   "point": "joint_1",
+   "pos_mm": [
+    0.0,
+    0.0,
+    128.2
+   ],
+   "from_previous_mm": 128.2
+  },
+  {
+   "point": "joint_2",
+   "pos_mm": [
+    0.0,
+    -30.0,
+    243.2
+   ],
+   "from_previous_mm": 118.8
+  },
+  {
+   "point": "joint_3",
+   "pos_mm": [
+    0.0,
+    -30.0,
+    523.2
+   ],
+   "from_previous_mm": 280.0
+  },
+  {
+   "point": "joint_4",
+   "pos_mm": [
+    0.0,
+    -10.0,
+    663.2
+   ],
+   "from_previous_mm": 141.4
+  },
+  {
+   "point": "joint_5",
+   "pos_mm": [
+    28.5,
+    -10.0,
+    768.2
+   ],
+   "from_previous_mm": 108.8
+  },
+  {
+   "point": "joint_6",
+   "pos_mm": [
+    57.0,
+    -10.0,
+    873.2
+   ],
+   "from_previous_mm": 108.8
+  },
+  {
+   "point": "flange (end_effector_link)",
+   "pos_mm": [
+    57.0,
+    -10.0,
+    873.2
+   ],
+   "from_previous_mm": 0.0
+  },
+  {
+   "point": "tool_frame (Kortex default tool)",
+   "pos_mm": [
+    57.0,
+    -10.0,
+    1003.2
+   ],
+   "from_previous_mm": 130.0
+  },
+  {
+   "point": "RL TCP (tool_frame + 8 mm)",
+   "pos_mm": [
+    57.0,
+    -10.0,
+    1011.2
+   ],
+   "from_previous_mm": 8.0
+  }
+ ],
+ "base": {
+  "base_diameter_mm": 88.6,
+  "base_mesh_bottom_z_mm": -0.0
+ },
+ "masses": {
+  "arm_total_kg (base_link .. fingers)": 5.237,
+  "moving_arm_kg (shoulder .. fingers)": 4.091,
+  "gripper_kg": 0.198
+ },
+ "gripper": {
+  "finger_gap_open_mm": 49.0,
+  "finger_gap_closed_mm": 1.0,
+  "flange_to_fingertip_mm": 156.1,
+  "flange_to_tool_frame_mm": 130.0,
+  "flange_to_rl_tcp_mm": 138.0,
+  "grip_force_limit_Nm (finger joint, ASSUMED)": 3.0
+ },
+ "joint_limits": {
+  "joint_1": {
+   "mjcf_joint_range_deg": [
+    -153.55,
+    153.55
+   ],
+   "mjcf_actuator_ctrlrange_deg": [
+    -153.55,
+    153.55
+   ],
+   "sim_controller_limit_deg": [
+    -153.55,
+    153.55
+   ],
+   "kinova_spec_deg": [
+    -154.1,
+    154.1
+   ],
+   "torque_limit_Nm": 10.0,
+   "servo_time_constant_s": 0.0923
+  },
+  "joint_2": {
+   "mjcf_joint_range_deg": [
+    -149.54,
+    149.54
+   ],
+   "mjcf_actuator_ctrlrange_deg": [
+    -65.0,
+    147.0
+   ],
+   "sim_controller_limit_deg": [
+    -65.0,
+    147.0
+   ],
+   "kinova_spec_deg": [
+    -150.1,
+    150.1
+   ],
+   "torque_limit_Nm": 14.0,
+   "servo_time_constant_s": 0.0667
+  },
+  "joint_3": {
+   "mjcf_joint_range_deg": [
+    -149.54,
+    149.54
+   ],
+   "mjcf_actuator_ctrlrange_deg": [
+    -149.54,
+    149.54
+   ],
+   "sim_controller_limit_deg": [
+    -149.54,
+    149.54
+   ],
+   "kinova_spec_deg": [
+    -150.1,
+    150.1
+   ],
+   "torque_limit_Nm": 10.0,
+   "servo_time_constant_s": 0.0923
+  },
+  "joint_4": {
+   "mjcf_joint_range_deg": [
+    -148.97,
+    148.97
+   ],
+   "mjcf_actuator_ctrlrange_deg": [
+    -165.0,
+    165.0
+   ],
+   "sim_controller_limit_deg": [
+    -148.97,
+    148.97
+   ],
+   "kinova_spec_deg": [
+    -148.98,
+    148.98
+   ],
+   "torque_limit_Nm": 7.0,
+   "servo_time_constant_s": 0.1
+  },
+  "joint_5": {
+   "mjcf_joint_range_deg": [
+    -144.96,
+    144.96
+   ],
+   "mjcf_actuator_ctrlrange_deg": [
+    -144.96,
+    144.96
+   ],
+   "sim_controller_limit_deg": [
+    -144.96,
+    144.96
+   ],
+   "kinova_spec_deg": [
+    -144.97,
+    144.97
+   ],
+   "torque_limit_Nm": 7.0,
+   "servo_time_constant_s": 0.1
+  },
+  "joint_6": {
+   "mjcf_joint_range_deg": [
+    -148.97,
+    148.97
+   ],
+   "mjcf_actuator_ctrlrange_deg": [
+    -165.0,
+    165.0
+   ],
+   "sim_controller_limit_deg": [
+    -148.97,
+    148.97
+   ],
+   "kinova_spec_deg": [
+    -148.98,
+    148.98
+   ],
+   "torque_limit_Nm": 7.0,
+   "servo_time_constant_s": 0.1
+  }
+ },
+ "speeds": {
+  "cartesian_max_m_s": 0.25,
+  "joint_max_speed_deg_s": [
+   57.3,
+   57.3,
+   57.3,
+   57.3,
+   57.3,
+   57.3
+  ],
+  "control_rate_hz": 20,
+  "gripper_full_close_s (ASSUMED)": 0.67
+ },
+ "test_poses": {
+  "zero (all joints 0)": {
+   "q_deg": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "q_deg_kortex_0_360": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "tool_pose_kortex": [
+    57.0,
+    -10.0,
+    1003.2,
+    0.0,
+    -0.0,
+    90.0
+   ],
+   "flange_mm": [
+    57.0,
+    -10.0,
+    873.2
+   ],
+   "rl_tcp_mm": [
+    57.0,
+    -10.0,
+    1011.2
+   ],
+   "wrist_joint_5_centre_mm": [
+    28.5,
+    -10.0,
+    768.2
+   ],
+   "elbow_joint_3_centre_mm": [
+    0.0,
+    -30.0,
+    523.2
+   ],
+   "gravity_torque_Nm": [
+    0.0,
+    0.961,
+    -0.614,
+    0.0,
+    0.059,
+    0.0
+   ],
+   "sim_contact": []
+  },
+  "home (Kinova factory Home)": {
+   "q_deg": [
+    0.0,
+    -16.04,
+    75.06,
+    0.0,
+    -60.16,
+    0.0
+   ],
+   "q_deg_kortex_0_360": [
+    0.0,
+    343.96,
+    75.06,
+    0.0,
+    299.84,
+    0.0
+   ],
+   "tool_pose_kortex": [
+    438.1,
+    193.8,
+    448.4,
+    90.55,
+    -0.95,
+    150.16
+   ],
+   "flange_mm": [
+    373.5,
+    81.1,
+    449.6
+   ],
+   "rl_tcp_mm": [
+    442.1,
+    200.8,
+    448.3
+   ],
+   "wrist_joint_5_centre_mm": [
+    321.8,
+    -10.0,
+    479.1
+   ],
+   "elbow_joint_3_centre_mm": [
+    77.4,
+    -30.0,
+    512.3
+   ],
+   "gravity_torque_Nm": [
+    0.0,
+    4.986,
+    -2.495,
+    -0.008,
+    0.001,
+    0.003
+   ],
+   "sim_contact": []
+  },
+  "rl_start (training start pose)": {
+   "q_deg": [
+    -57.43,
+    -0.34,
+    108.87,
+    11.87,
+    -59.45,
+    67.54
+   ],
+   "q_deg_kortex_0_360": [
+    302.57,
+    359.66,
+    108.87,
+    11.87,
+    300.55,
+    67.54
+   ],
+   "tool_pose_kortex": [
+    352.0,
+    -180.0,
+    390.0,
+    17.19,
+    -90.0,
+    162.81
+   ],
+   "flange_mm": [
+    222.0,
+    -180.0,
+    390.0
+   ],
+   "rl_tcp_mm": [
+    360.0,
+    -180.0,
+    390.0
+   ],
+   "wrist_joint_5_centre_mm": [
+    117.0,
+    -190.9,
+    416.3
+   ],
+   "elbow_joint_3_centre_mm": [
+    -24.4,
+    -17.6,
+    523.2
+   ],
+   "gravity_torque_Nm": [
+    0.0,
+    2.562,
+    -2.17,
+    0.078,
+    0.039,
+    0.0
+   ],
+   "sim_contact": []
+  },
+  "home + joint_1 +30 deg": {
+   "q_deg": [
+    30.0,
+    -16.04,
+    75.06,
+    0.0,
+    -60.16,
+    0.0
+   ],
+   "q_deg_kortex_0_360": [
+    30.0,
+    343.96,
+    75.06,
+    0.0,
+    299.84,
+    0.0
+   ],
+   "tool_pose_kortex": [
+    282.5,
+    386.9,
+    448.4,
+    90.55,
+    -0.95,
+    -179.84
+   ],
+   "flange_mm": [
+    282.9,
+    257.0,
+    449.6
+   ],
+   "rl_tcp_mm": [
+    282.5,
+    394.9,
+    448.3
+   ],
+   "wrist_joint_5_centre_mm": [
+    283.7,
+    152.2,
+    479.1
+   ],
+   "elbow_joint_3_centre_mm": [
+    82.0,
+    12.7,
+    512.3
+   ],
+   "gravity_torque_Nm": [
+    0.0,
+    4.986,
+    -2.495,
+    -0.008,
+    0.001,
+    0.003
+   ],
+   "sim_contact": []
+  },
+  "home + joint_2 +20 deg": {
+   "q_deg": [
+    0.0,
+    3.96,
+    75.06,
+    0.0,
+    -60.16,
+    0.0
+   ],
+   "q_deg_kortex_0_360": [
+    0.0,
+    3.96,
+    75.06,
+    0.0,
+    299.84,
+    0.0
+   ],
+   "tool_pose_kortex": [
+    341.6,
+    193.8,
+    585.9,
+    80.33,
+    16.32,
+    148.77
+   ],
+   "flange_mm": [
+    280.4,
+    81.1,
+    564.9
+   ],
+   "rl_tcp_mm": [
+    345.3,
+    200.8,
+    587.2
+   ],
+   "wrist_joint_5_centre_mm": [
+    221.7,
+    -10.0,
+    575.0
+   ],
+   "elbow_joint_3_centre_mm": [
+    -19.3,
+    -30.0,
+    522.6
+   ],
+   "gravity_torque_Nm": [
+    0.0,
+    2.377,
+    -2.571,
+    -0.007,
+    -0.019,
+    0.003
+   ],
+   "sim_contact": []
+  },
+  "home + joint_3 -30 deg": {
+   "q_deg": [
+    0.0,
+    -16.04,
+    45.06,
+    0.0,
+    -60.16,
+    0.0
+   ],
+   "q_deg_kortex_0_360": [
+    0.0,
+    343.96,
+    45.06,
+    0.0,
+    299.84,
+    0.0
+   ],
+   "tool_pose_kortex": [
+    421.8,
+    193.8,
+    637.4,
+    74.64,
+    24.78,
+    146.77
+   ],
+   "flange_mm": [
+    365.2,
+    81.1,
+    606.1
+   ],
+   "rl_tcp_mm": [
+    425.3,
+    200.8,
+    639.3
+   ],
+   "wrist_joint_5_centre_mm": [
+    305.6,
+    -10.0,
+    605.8
+   ],
+   "elbow_joint_3_centre_mm": [
+    77.4,
+    -30.0,
+    512.3
+   ],
+   "gravity_torque_Nm": [
+    0.0,
+    4.983,
+    -2.492,
+    -0.007,
+    -0.029,
+    0.003
+   ],
+   "sim_contact": []
+  },
+  "home + joint_4 +45 deg": {
+   "q_deg": [
+    0.0,
+    -16.04,
+    75.06,
+    45.0,
+    -60.16,
+    0.0
+   ],
+   "q_deg_kortex_0_360": [
+    0.0,
+    343.96,
+    75.06,
+    45.0,
+    299.84,
+    0.0
+   ],
+   "tool_pose_kortex": [
+    441.2,
+    174.4,
+    609.2,
+    49.51,
+    -21.62,
+    157.76
+   ],
+   "flange_mm": [
+    375.0,
+    94.7,
+    530.7
+   ],
+   "rl_tcp_mm": [
+    445.3,
+    179.4,
+    614.0
+   ],
+   "wrist_joint_5_centre_mm": [
+    321.9,
+    10.2,
+    487.5
+   ],
+   "elbow_joint_3_centre_mm": [
+    77.4,
+    -30.0,
+    512.3
+   ],
+   "gravity_torque_Nm": [
+    0.0,
+    4.988,
+    -2.497,
+    0.304,
+    0.073,
+    0.002
+   ],
+   "sim_contact": []
+  },
+  "home + joint_5 +30 deg": {
+   "q_deg": [
+    0.0,
+    -16.04,
+    75.06,
+    0.0,
+    -30.16,
+    0.0
+   ],
+   "q_deg_kortex_0_360": [
+    0.0,
+    343.96,
+    75.06,
+    0.0,
+    329.84,
+    0.0
+   ],
+   "tool_pose_kortex": [
+    524.4,
+    108.1,
+    446.7,
+    90.95,
+    -0.55,
+    120.16
+   ],
+   "flange_mm": [
+    412.0,
+    42.8,
+    448.9
+   ],
+   "rl_tcp_mm": [
+    531.3,
+    112.1,
+    446.6
+   ],
+   "wrist_joint_5_centre_mm": [
+    321.8,
+    -10.0,
+    479.1
+   ],
+   "elbow_joint_3_centre_mm": [
+    77.4,
+    -30.0,
+    512.3
+   ],
+   "gravity_torque_Nm": [
+    0.0,
+    4.97,
+    -2.479,
+    0.051,
+    0.0,
+    0.003
+   ],
+   "sim_contact": []
+  },
+  "home + joint_6 +60 deg": {
+   "q_deg": [
+    0.0,
+    -16.04,
+    75.06,
+    0.0,
+    -60.16,
+    60.0
+   ],
+   "q_deg_kortex_0_360": [
+    0.0,
+    343.96,
+    75.06,
+    0.0,
+    299.84,
+    60.0
+   ],
+   "tool_pose_kortex": [
+    438.1,
+    193.8,
+    448.4,
+    91.13,
+    -60.95,
+    149.18
+   ],
+   "flange_mm": [
+    373.5,
+    81.1,
+    449.6
+   ],
+   "rl_tcp_mm": [
+    442.1,
+    200.8,
+    448.3
+   ],
+   "wrist_joint_5_centre_mm": [
+    321.8,
+    -10.0,
+    479.1
+   ],
+   "elbow_joint_3_centre_mm": [
+    77.4,
+    -30.0,
+    512.3
+   ],
+   "gravity_torque_Nm": [
+    0.0,
+    4.987,
+    -2.496,
+    -0.008,
+    0.001,
+    0.002
+   ],
+   "sim_contact": []
+  }
+ }
+}

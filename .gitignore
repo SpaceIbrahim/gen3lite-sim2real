@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+sim2real/logs/*
+!sim2real/logs/.gitkeep
+*.whl

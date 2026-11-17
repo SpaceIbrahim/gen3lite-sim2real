@@ -1,0 +1,59 @@
+# =============================================================================
+# World / scene layout.  All positions are in the ROBOT BASE frame unless noted:
+#   origin = centre of the robot's base on the table surface, +x forward, +z up.
+# =============================================================================
+
+table:
+  # Real lab table (measured 2026-11-17, docs/real_setup.md).  The robot's front (+x) points at one
+  # of the 136 cm long edges, so the table is 120.5 cm along x and 136 cm along y.
+  # Base edge -> table edges: 83.5 cm in front (+x), 26.5 cm behind (-x), 71 cm to the robot's
+  # left (+y), 54.5 cm to its right (-y).  Base diameter 10.5 cm (120.5 - 83.5 - 26.5), so from the
+  # base CENTRE: +x 0.8875, -x 0.3175, +y 0.7625, -y 0.5975 m.
+  height: 0.75              # floor -> table top (m)  (ASSUMED -- not measured; only moves the floor)
+  size: [1.205, 1.36]       # x, y (m)
+  thickness: 0.04
+  # where the robot sits on the table: robot base position relative to table centre
+  robot_offset_on_table: [-0.285, -0.0825]
+  # How far the cabinet may hang over the table edge (m) and still count as a valid placement.
+  # The real table is only 0.8875 m deep in front of the base, but the cabinet (0.395 m deep) at the
+  # nominal 0.60 m reaches 0.995 m, i.e. it overhangs by 10.75 cm.  The cabinet's centre stays on
+  # the table up to ~+8 cm farther than nominal.  0.0 = the cabinet must be fully on the table.
+  # 0.12 confirmed for the real setup (2026-11-17): weigh down / clamp the cabinet, the pull drags it.
+  max_cabinet_overhang: 0.12
+  friction: [0.8, 0.005, 0.0001]
+  rgba: [0.55, 0.45, 0.35, 1.0]
+
+drawer_placement:
+  # Position of the cabinet origin (bottom-centre of the carcass front edge)
+  # in the robot base frame.  yaw_deg = 0 -> drawer front faces the robot (-x).
+  x: 0.60
+  y: -0.18                  # 18 cm to the robot's RIGHT of straight ahead.  Straight ahead (y = 0) puts the
+                            # wrist on a singularity (joint 5 near 0): huge wrist speeds and no clockwise
+                            # drawer rotation.  Offset: full +/-15 deg at every distance (see docs).
+  z: 0.0                    # 0 = standing on the table
+  yaw_deg: 0.0
+
+physics:
+  timestep: 0.002
+  integrator: implicitfast
+  cone: elliptic            # elliptic friction cone + impratio 50: needed for the handle not to slip out
+                            #   of the fingertips (pyramidal / impratio 10 let every grasp slide off)
+  impratio: 50
+  noslip_iterations: 0      # the robot MJCF uses 8; 0 is much faster for training
+  tolerance: 1.0e-8
+  iterations: 50
+  gravity: [0, 0, -9.81]
+
+cameras:                    # fixed cameras: position + point they look at (robot base frame)
+  overview:  {pos: [-0.45, -1.00, 0.75], lookat: [0.40, 0.0, 0.25]}
+  side_view: {pos: [0.40, -1.30, 0.35],  lookat: [0.40, 0.0, 0.30]}
+  drawer_closeup: {pos: [0.05, -0.30, 0.45], lookat: [0.55, 0.0, 0.35]}
+
+render:
+  width: 640
+  height: 480
+  camera:                   # free camera used for previews / videos
+    lookat: [0.35, 0.0, 0.30]
+    distance: 1.5
+    azimuth: -50
+    elevation: -22

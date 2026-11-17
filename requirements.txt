@@ -1,0 +1,8 @@
+# pip3 install --user -r requirements.txt   (then the Kortex wheel + protobuf==3.20.3, see README)
+mujoco>=3.17,<4
+gymnasium>=1.0
+numpy>=1.24
+scipy>=1.10
+pyyaml>=6.0
+matplotlib>=3.6
+pytest>=7

@@ -1,0 +1,44 @@
+# Settings for python -m sim2real.mirror (any value can be overridden with --set key=value).
+
+robot:
+  ip: 192.168.1.10          # Gen3 Lite over USB (RNDIS) is 192.168.1.10; over Ethernet use the arm's own IP
+  port: 10000
+  username_env: KINOVA_USERNAME   # the login is read from these environment variables, never from a file
+  password_env: KINOVA_PASSWORD
+
+sim:
+  cabinet: false            # true = keep the drawer cabinet in the simulated world (contacts get reported)
+  overrides: []             # extra config overrides for the simulated arm, e.g. ["robot.actuator_overrides.a_joint_2.kp=900"]
+
+loop:
+  rate_hz: 20               # the policy's control rate
+  # independent: each arm tracks the reference from ITS OWN measured state (what the deploy loop does)
+  # feedforward: both arms get the reference joint SPEED only (no feedback, identical commands); the sim
+  #              integrates it into its servo target like Kortex does.  Shows raw speed gain / lag / drift.
+  command_mode: independent
+
+safety:
+  speed_scale: 0.5          # motions run this much slower than their nominal speed (1.0 = nominal)
+  max_joint_speed_deg_s: 30 # hard cap on any joint speed command sent to the real arm
+  joint_margin_deg: 10      # motions must keep every joint this far from its limit (pre-check)
+  min_tcp_height_m: 0.05    # motions must keep the TCP this high above the table (pre-check)
+  start_tol_deg: 3          # the real arm must be this close to a motion's start pose (else: goto first)
+  abort_track_deg: 12       # abort if the real arm is this far from the reference ...
+  abort_diverge_deg: 12     # ... or from the simulated arm
+  abort_torque_fraction: 1.2 # abort if a real joint torque exceeds this x the sim torque limit
+  abort_margin_deg: 4       # abort if a real joint gets this close to a SIM joint limit
+
+motions:                    # default parameters (see sim2real/trajectories.py)
+  joint_sweep: {amp_deg: 20.0, speed_deg_s: 20.0}
+  steps: {step_deg: 5.0}
+  cartesian: {amp_m: 0.08, speed_m_s: 0.08}
+  pull: {reach_m: 0.12, pull_m: 0.15, speed_m_s: 0.10}
+  gripper: {cycles: 2}
+
+fake:                       # the stand-in "real" arm for --real fake (deliberate differences)
+  latency_steps: 1
+  speed_gain: 0.9
+  q_offset_deg: [0, 0, 0, 0, 0.5, 0]
+  kp_scale: 0.8
+
+log_dir: sim2real/logs

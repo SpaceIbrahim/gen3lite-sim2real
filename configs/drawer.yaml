@@ -1,0 +1,80 @@
+# =============================================================================
+# Drawer / cabinet model.  All lengths in METRES, masses in kg.
+# Values come from "Drawer dimensions" PDF.  Anything marked (ASSUMED) was not
+# measured in the PDF and should be checked against the real cabinet.
+#
+# Frame convention for this file (cabinet-local frame):
+#   origin = bottom of the cabinet, centre of the FRONT edge of the carcass
+#            (the vertical plane the drawer fronts rest against)
+#   +x     = into the cabinet (away from whoever is opening it)
+#   +y     = to the left when looking at the front of the cabinet
+#   +z     = up
+# The drawer opens along -x.
+# =============================================================================
+
+cabinet:
+  width: 0.345            # PDF: 34.5 cm
+  depth: 0.395            # PDF: 39.5 cm
+  height: 0.49            # PDF: 49 cm
+  side_thickness: 0.016   # (ASSUMED) carcass side panels
+  bottom_thickness: 0.016 # (ASSUMED)
+  back_thickness: 0.005   # (ASSUMED)
+  top_thickness: 0.0175   # (ASSUMED) top slab
+  top_overhang: 0.0175    # PDF p2: top slab sticks out 1.75 cm past the carcass front
+  mass: 15.0              # only used if the cabinet is made free (it is static by default)
+  rgba: [0.20, 0.14, 0.11, 1.0]
+
+# --------------------------------------------------------------------------
+# Top drawer  (the one the robot opens)
+# --------------------------------------------------------------------------
+top_drawer:
+  front_height: 0.145     # PDF p1: 14.5 cm   (p3 says 13.5 cm -- please confirm)
+  front_width: 0.341      # (ASSUMED) cabinet width minus ~2 mm reveal each side
+  front_thickness: 0.016  # PDF p2: drawer front sits ~1.6 cm proud of the carcass
+  top_gap: 0.035          # (ASSUMED, estimated from photo) cabinet top -> top edge of drawer front
+  # Drawer box (the part that slides inside the carcass)
+  box_depth: 0.34         # (ASSUMED)
+  box_height: 0.11        # (ASSUMED)
+  box_wall: 0.012         # (ASSUMED)
+  box_side_clearance: 0.004  # (ASSUMED) gap between box and carcass sides
+  mass: 1.5               # (ASSUMED) drawer + front + handle
+  rgba: [0.24, 0.17, 0.13, 1.0]
+
+  # Slide joint (the part you will most likely need to tune for sim-to-real)
+  slide:
+    max_travel: 0.30      # (ASSUMED) how far the drawer can be pulled out
+    damping: 8.0          # N/(m/s) viscous resistance          (ASSUMED)
+    frictionloss: 3.0     # N   Coulomb friction (force to start moving) (ASSUMED)
+    armature: 0.0
+    stiffness: 0.0        # >0 adds a spring pulling the drawer shut
+    stiffness_ref: 0.0
+
+# --------------------------------------------------------------------------
+# Handle  (PDF p3)
+# --------------------------------------------------------------------------
+handle:
+  length: 0.105           # outer end-to-end length (10.5 cm)
+  standoff: 0.030         # front face of drawer -> outer face of bar (3 cm)
+  clearance: 0.019        # front face of drawer -> inner face of bar (1.9 cm)
+  post_diameter: 0.011    # 1.1 cm
+  bar_diameter: null      # null -> standoff - clearance (= 1.1 cm)
+  # Offset of the handle centre from the centre of the drawer front (y, z).
+  # PDF: handle is centred horizontally and vertically.
+  offset_y: 0.0
+  offset_z: 0.0
+  friction: [1.0, 0.005, 0.0001]
+  rgba: [0.05, 0.05, 0.05, 1.0]
+
+# --------------------------------------------------------------------------
+# Bottom drawer -- static (not actuated, only for looks + collision)
+# --------------------------------------------------------------------------
+bottom_drawer:
+  enabled: true
+  front_height: 0.19      # PDF p1: 19 cm
+  gap_below_top_drawer: 0.012  # (ASSUMED)
+  has_handle: false
+
+physics:
+  geom_friction: [0.8, 0.005, 0.0001]
+  solref: [0.005, 1.0]
+  solimp: [0.9, 0.95, 0.001]
