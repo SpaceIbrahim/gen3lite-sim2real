@@ -2,15 +2,12 @@
 
 Both classes have the same interface, so every mirror mode can be rehearsed with ``--real fake``
 before the real arm is involved.  Joint angles are in rad, wrapped to [-pi, pi] (MJCF convention);
-Kortex itself uses degrees, 0..360.
+Kortex reports degrees 0..360 and accepts -180..180 in actions.
 
-Kortex API: install the wheel from https://github.com/Kinovarobotics/kortex/releases
-(kortex_api-2.x). It needs protobuf 3.20, which conflicts with the training venv, so use a
-separate venv for the real arm (see sim2real/README.md).
+Kortex API: install the wheel from Kinova (see README), with protobuf 3.20.
 """
 from __future__ import annotations
 
-import os
 import threading
 import time
 from dataclasses import dataclass
@@ -33,12 +30,30 @@ class RealState:
 
 
 # =============================================================================== real arm
+TIMEOUT_DURATION = 20          # s, maximum wait for a Kortex action (as in the lab demo.py)
+
+
+def check_for_end_or_abort(e, Base_pb2):
+    """Closure that sets ``e`` on an END or ABORT action notification (lab demo.py)."""
+    def check(notification, e=e):
+        print("EVENT : " + Base_pb2.ActionEvent.Name(notification.action_event))
+        if notification.action_event in (Base_pb2.ACTION_END, Base_pb2.ACTION_ABORT):
+            e.set()
+    return check
+
+
 class KortexArm:
+    """The real arm, written the same way as the lab's kinova/manual/demo.py: a DeviceConnection
+    router, BaseClient + BaseCyclicClient, joint-angle actions with END/ABORT notifications,
+    GRIPPER_POSITION commands (0 open .. 1 closed) and GetMeasuredGripperMovement.
+
+    Added for the mirror: SendJointSpeedsCommand streaming, ComputeForwardKinematics, Stop.
+    """
     name = "real"
 
-    def __init__(self, ip="192.168.1.10", port=10000, user_env="KINOVA_USERNAME", pass_env="KINOVA_PASSWORD"):
-        self.ip, self.port, self.user_env, self.pass_env = ip, port, user_env, pass_env
-        self._transport = self._session = None
+    def __init__(self, ip="192.168.1.10", username="admin", password="admin"):
+        self.ip, self.username, self.password = ip, username, password
+        self._conn = None
 
     # ------------------------------------------------------------ connection
     def connect(self):
@@ -46,64 +61,62 @@ class KortexArm:
             from kortex_api.autogen.client_stubs.BaseClientRpc import BaseClient
             from kortex_api.autogen.client_stubs.BaseCyclicClientRpc import BaseCyclicClient
             from kortex_api.autogen.client_stubs.ControlConfigClientRpc import ControlConfigClient
-            from kortex_api.autogen.messages import Base_pb2, Session_pb2
-            from kortex_api.RouterClient import RouterClient
-            from kortex_api.SessionManager import SessionManager
-            from kortex_api.TCPTransport import TCPTransport
+            from kortex_api.autogen.messages import Base_pb2
+
+            from .kortex_utilities import DeviceConnection
         except ImportError as e:
-            raise ImportError("kortex_api is not installed in this Python (see sim2real/README.md); "
+            raise ImportError("kortex_api is not installed in this Python (see README); "
                               "use --real fake for a dry run") from e
         self.Base_pb2 = Base_pb2
-        user, pwd = os.environ.get(self.user_env), os.environ.get(self.pass_env)
-        if not user or not pwd:
-            raise RuntimeError(f"set ${self.user_env} and ${self.pass_env} to the arm's login first")
-        self._transport = TCPTransport()
-        self._router = RouterClient(self._transport, RouterClient.basicErrorCallback)
-        self._transport.connect(self.ip, int(self.port))
-        info = Session_pb2.CreateSessionInfo()
-        info.username, info.password = user, pwd
-        info.session_inactivity_timeout = 60000
-        info.connection_inactivity_timeout = 2000
-        self._session = SessionManager(self._router)
-        self._session.CreateSession(info)
-        self.base = BaseClient(self._router)
-        self.cyclic = BaseCyclicClient(self._router)
-        self.config = ControlConfigClient(self._router)
-        mode = Base_pb2.ServoingModeInformation()
-        mode.servoing_mode = Base_pb2.SINGLE_LEVEL_SERVOING
-        self.base.SetServoingMode(mode)
-        self.n_joints = self.base.GetActuatorCount().count
-        if self.n_joints != 6:
-            raise RuntimeError(f"expected a 6-joint Gen3 Lite, the arm reports {self.n_joints} actuators")
+        self._conn = DeviceConnection.createTcpConnection(self.ip, self.username, self.password)
+        router = self._conn.__enter__()
+        try:
+            self.base = BaseClient(router)
+            self.base_cyclic = BaseCyclicClient(router)
+            self.config = ControlConfigClient(router)
+            # Make sure the arm is in Single Level Servoing mode
+            base_servo_mode = Base_pb2.ServoingModeInformation()
+            base_servo_mode.servoing_mode = Base_pb2.SINGLE_LEVEL_SERVOING
+            self.base.SetServoingMode(base_servo_mode)
+            n = self.base.GetActuatorCount().count
+            if n != 6:
+                raise RuntimeError(f"expected a 6-joint Gen3 Lite, the arm reports {n} actuators")
+        except BaseException:
+            self._conn.__exit__(None, None, None)
+            self._conn = None
+            raise
 
     def close(self):
-        if self._session is None:
+        if self._conn is None:
             return
         try:
             self.stop()
         finally:
-            try:
-                self._session.CloseSession()
-            finally:
-                self._transport.disconnect()
-                self._session = None
+            self._conn.__exit__(None, None, None)
+            self._conn = None
 
     # ----------------------------------------------------------------- read
+    def get_gripper(self) -> float:
+        """Kortex gripper position, 0 open .. 1 closed (None if no gripper answers)."""
+        gripper_request = self.Base_pb2.GripperRequest()
+        gripper_request.mode = self.Base_pb2.GRIPPER_POSITION
+        gripper_measure = self.base.GetMeasuredGripperMovement(gripper_request)
+        if len(gripper_measure.finger):
+            return gripper_measure.finger[0].value
+        return None
+
     def read(self) -> RealState:
-        fb = self.cyclic.RefreshFeedback()
-        act = fb.actuators[:6]
-        q = wrap(np.radians([a.position for a in act]))
-        dq = np.radians([a.velocity for a in act])
-        b = fb.base
-        try:
-            grip = 1.0 - fb.interconnect.gripper_feedback.motor[0].position / 100.0
-        except (AttributeError, IndexError):
-            grip = np.nan
+        feedback = self.base_cyclic.RefreshFeedback()
+        act = feedback.actuators[:6]
+        q = wrap(np.radians([j.position for j in act]))           # Kortex: degrees, 0..360
+        dq = np.radians([j.velocity for j in act])
+        b = feedback.base
+        g = self.get_gripper()
         fault = ""
         if getattr(b, "fault_bank_a", 0) or getattr(b, "fault_bank_b", 0):
             fault = f"base fault banks a={b.fault_bank_a} b={b.fault_bank_b}"
-        return RealState(time.time(), q, dq, np.array([a.torque for a in act]),
-                         np.array([a.current_motor for a in act]), float(grip),
+        return RealState(time.time(), q, dq, np.array([j.torque for j in act]),
+                         np.array([j.current_motor for j in act]), np.nan if g is None else 1.0 - g,
                          np.array([b.tool_pose_x, b.tool_pose_y, b.tool_pose_z,
                                    b.tool_pose_theta_x, b.tool_pose_theta_y, b.tool_pose_theta_z]), fault)
 
@@ -131,64 +144,92 @@ class KortexArm:
             t = tc.tool_transform
             out["tool_transform"] = [t.x, t.y, t.z, t.theta_x, t.theta_y, t.theta_z]
             out["tool_mass_kg"] = tc.tool_mass
-            out["tool_mass_center"] = [tc.tool_mass_center.x, tc.tool_mass_center.y, tc.tool_mass_center.z]
         except Exception as e:  # noqa: BLE001
             out["tool_transform"] = f"unavailable: {e}"
         try:
             out["arm_state"] = self.Base_pb2.ArmState.Name(self.base.GetArmState().active_state)
         except Exception as e:  # noqa: BLE001
             out["arm_state"] = f"unavailable: {e}"
+        try:
+            out["home_action_deg"] = self.home_angles_deg()
+        except Exception as e:  # noqa: BLE001
+            out["home_action_deg"] = f"unavailable: {e}"
         return out
 
     def fk(self, q) -> np.ndarray:
         """The arm's OWN forward kinematics (no motion) -> tool pose, Kortex convention."""
         ja = self.Base_pb2.JointAngles()
-        for i, a in enumerate(np.degrees(q) % 360):
+        for joint_id, a in enumerate(np.degrees(wrap(q))):
             j = ja.joint_angles.add()
-            j.joint_identifier, j.value = i, float(a)
+            j.joint_identifier, j.value = joint_id, float(a)
         p = self.base.ComputeForwardKinematics(ja)
         return np.array([p.x, p.y, p.z, p.theta_x, p.theta_y, p.theta_z])
 
     # -------------------------------------------------------------- command
     def send_joint_speeds(self, v_rad_s) -> None:
-        js = self.Base_pb2.JointSpeeds()
-        for i, v in enumerate(np.degrees(v_rad_s)):
-            s = js.joint_speeds.add()
-            s.joint_identifier, s.value, s.duration = i, float(v), 0
-        self.base.SendJointSpeedsCommand(js)
+        joint_speeds = self.Base_pb2.JointSpeeds()
+        for joint_id, v in enumerate(np.degrees(v_rad_s)):
+            s = joint_speeds.joint_speeds.add()
+            s.joint_identifier, s.value, s.duration = joint_id, float(v), 0
+        self.base.SendJointSpeedsCommand(joint_speeds)
 
     def send_gripper(self, g_open: float) -> None:
-        """Position command, 0 closed .. 1 open (Kortex: 0 open .. 1 closed)."""
-        gc = self.Base_pb2.GripperCommand()
-        gc.mode = self.Base_pb2.GRIPPER_POSITION
-        f = gc.gripper.finger.add()
-        f.finger_identifier, f.value = 1, float(np.clip(1.0 - g_open, 0, 1))
-        self.base.SendGripperCommand(gc)
+        """Our convention 0 closed .. 1 open -> Kortex GRIPPER_POSITION 0 open .. 1 closed."""
+        gripper_command = self.Base_pb2.GripperCommand()
+        finger = gripper_command.gripper.finger.add()
+        gripper_command.mode = self.Base_pb2.GRIPPER_POSITION
+        finger.value = float(np.clip(1.0 - g_open, 0, 1))
+        self.base.SendGripperCommand(gripper_command)
 
-    def move_to(self, q, timeout=30.0) -> bool:
-        """Kortex's own joint-space move (its planner and speed limits).  Blocks until done."""
-        B = self.Base_pb2
-        action = B.Action()
-        action.name, action.application_data = "sim2real_move_to", ""
-        for i, a in enumerate(np.degrees(q) % 360):
-            j = action.reach_joint_angles.joint_angles.joint_angles.add()
-            j.joint_identifier, j.value = i, float(a)
-        done = threading.Event()
-        result = {}
-
-        def cb(n):
-            if n.action_event in (B.ACTION_END, B.ACTION_ABORT):
-                result["ok"] = n.action_event == B.ACTION_END
-                done.set()
-        handle = self.base.OnNotificationActionTopic(cb, B.NotificationOptions())
+    def _run_action(self, execute) -> bool:
+        e = threading.Event()
+        notification_handle = self.base.OnNotificationActionTopic(check_for_end_or_abort(e, self.Base_pb2),
+                                                                  self.Base_pb2.NotificationOptions())
         try:
-            self.base.ExecuteAction(action)
-            finished = done.wait(timeout)
+            execute()
+            finished = e.wait(TIMEOUT_DURATION)
         finally:
-            self.base.Unsubscribe(handle)
+            self.base.Unsubscribe(notification_handle)
         if not finished:
+            print("Timeout on action notification wait")
             self.stop()
-        return finished and result.get("ok", False)
+        return finished
+
+    def move_to(self, q) -> bool:
+        """Angular action movement to joint angles ``q`` (rad), like the lab's
+        example_angular_action_movement (angles sent in degrees, -180..180)."""
+        action = self.Base_pb2.Action()
+        action.name = "sim2real angular action movement"
+        action.application_data = ""
+        for joint_id, a in enumerate(np.degrees(wrap(q))):
+            joint_angle = action.reach_joint_angles.joint_angles.joint_angles.add()
+            joint_angle.joint_identifier = joint_id
+            joint_angle.value = float(a)
+        return self._run_action(lambda: self.base.ExecuteAction(action))
+
+    def _home_action(self):
+        action_type = self.Base_pb2.RequestedActionType()
+        action_type.action_type = self.Base_pb2.REACH_JOINT_ANGLES
+        for action in self.base.ReadAllActions(action_type).action_list:
+            if action.name == "Home":
+                return action
+        return None
+
+    def home_angles_deg(self):
+        """Joint angles of the arm's stored "Home" action (deg), to compare with the sim's home."""
+        a = self._home_action()
+        if a is None:
+            return None
+        full = self.base.ReadAction(a.handle)
+        return [j.value for j in full.reach_joint_angles.joint_angles.joint_angles]
+
+    def move_home(self) -> bool:
+        """The arm's own stored "Home" action (lab example_move_to_home_position)."""
+        a = self._home_action()
+        if a is None:
+            print("Can't find the Home action on the arm")
+            return False
+        return self._run_action(lambda: self.base.ExecuteActionFromReference(a.handle))
 
     def stop(self) -> None:
         try:
@@ -240,7 +281,8 @@ class FakeArm:
 
     def info(self) -> dict:
         return {"hard_limits": {"joint_speed_deg_s": [57.3] * 6, "twist_linear_m_s": 0.25},
-                "tool_transform": self.tool_transform, "arm_state": "FAKE"}
+                "tool_transform": self.tool_transform, "arm_state": "FAKE",
+                "home_action_deg": self.home_angles_deg()}
 
     def fk(self, q) -> np.ndarray:
         q_save = self.sim.q()
@@ -270,6 +312,12 @@ class FakeArm:
         g = cur + np.clip(self._g - cur, -step, step)
         s.d.ctrl[e.grip_act] = e.grip_closed + g * (e.grip_open - e.grip_closed)
         s.tick(dt)
+
+    def move_home(self) -> bool:
+        return self.move_to(self.sim.q_home + self.q_off)
+
+    def home_angles_deg(self):
+        return np.degrees(self.sim.q_home).tolist()
 
     def move_to(self, q, timeout=30.0) -> bool:
         s = self.sim

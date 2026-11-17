@@ -64,8 +64,7 @@ def make_real(args, cfg, start_q=None):
         f = cfg["fake"]
         return FakeArm(f["latency_steps"], f["speed_gain"], f["q_offset_deg"], f["kp_scale"], start_q=start_q,
                        overrides=cfg["sim"]["overrides"])
-    r = cfg["robot"]
-    return KortexArm(r["ip"], r["port"], r["username_env"], r["password_env"])
+    return KortexArm(args.ip or cfg["robot"]["ip"], args.username, args.password)
 
 
 def tool_transform_of(real) -> list:
@@ -127,6 +126,11 @@ def cmd_info(args, cfg):
     if isinstance(tt, list):
         print(f"tool transform     real {np.round(tt, 4).tolist()} | sim tool_frame {MJCF_TOOL}"
               "   (pos m, angles deg; the RL TCP is 8 mm further along z)")
+    ha = info.get("home_action_deg")
+    if isinstance(ha, list):
+        d = np.degrees(wrap(np.radians(ha) - sim.q_home))
+        print(f"arm's Home action  {np.round(ha, 2).tolist()} deg | sim home {np.degrees(sim.q_home).round(2).tolist()} "
+              f"(difference {d.round(2).tolist()})")
     print(f"joint angles now   {np.degrees(rs.q).round(2).tolist()} deg")
     print(f"margin to SIM joint limits {sim.joint_margin_deg(rs.q).round(1).tolist()} deg")
     if rs.fault:
@@ -248,18 +252,25 @@ def _check_joint_path(sim, q_a, q_b, cfg):
 
 def cmd_goto(args, cfg):
     sim = SimArm(cfg["sim"]["overrides"], cfg["sim"]["cabinet"])
-    q_t = np.radians(args.deg) if args.deg else named_pose(args.pose, sim)
     with make_real(args, cfg) as real:
+        use_home_action = args.pose == "home" and not args.deg
+        if use_home_action:         # the arm's own stored Home action, like the lab demo.py
+            ha = real.home_angles_deg()
+            q_t = np.radians(ha) if ha else sim.q_home
+        else:
+            q_t = np.radians(args.deg) if args.deg else named_pose(args.pose, sim)
         rs = real.read()
         probs = _check_joint_path(sim, rs.q, wrap(rs.q + wrap(q_t - rs.q)), cfg)
         if probs:
             raise SystemExit("refusing: the simulated move is unsafe:\n  " + "\n  ".join(probs))
         confirm(args, f"Move from {np.degrees(rs.q).round(1).tolist()}\n  to   {np.degrees(q_t).round(1).tolist()} deg "
-                      "with the arm's own joint-space planner.")
-        ok = real.move_to(q_t)
+                      f"with {'the arm Home action' if use_home_action else 'an angular action'} (Kortex planner).")
+        ok = real.move_home() if use_home_action else real.move_to(q_t)
         rs = real.read()
     err = np.degrees(wrap(rs.q - q_t))
     print(f"{'reached' if ok else 'NOT reached'}; joint error {err.round(2).tolist()} deg")
+    if use_home_action:
+        print(f"sim home differs from the reached Home by {np.degrees(wrap(rs.q - sim.q_home)).round(2).tolist()} deg")
     print("tool pose now (Kortex):", np.r_[1000 * rs.tool_pose[:3], rs.tool_pose[3:]].round(1).tolist(),
           "(mm, deg) -- compare with sim2real/reference/arm_reference.md")
 
@@ -399,6 +410,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--real", choices=["kortex", "fake"], default="kortex",
                     help="kortex = the real arm; fake = simulated stand-in (dry run)")
+    # connection arguments, same as the lab's utilities.parseConnectionArguments
+    ap.add_argument("--ip", type=str, default=None, help="IP address of the arm (default: robot.ip in mirror.yaml)")
+    ap.add_argument("-u", "--username", type=str, default="admin", help="username to login")
+    ap.add_argument("-p", "--password", type=str, default="admin", help="password to login")
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                     help="override sim2real/mirror.yaml (repeatable), e.g. --set safety.speed_scale=0.3")
     ap.add_argument("--yes", action="store_true", help="skip the 'go' confirmation (not recommended on the real arm)")

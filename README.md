@@ -47,12 +47,16 @@ python3 -m sim2real.report sim2real/logs/<newest>_drive_joint_sweep.npz
 
 ## Connect to the arm
 
+Connection works like the lab's `kinova/manual/demo.py` and `utilities.py` (same `DeviceConnection` helper,
+`--ip`, `-u` and `-p` arguments, default `admin` / `admin`):
+
 ```bash
-export KINOVA_USERNAME=admin KINOVA_PASSWORD=...   # never stored in any file
-python3 -m sim2real.mirror info
+python3 -m sim2real.mirror info                          # 192.168.1.10, admin/admin
+python3 -m sim2real.mirror --ip 192.168.1.10 -u admin -p <password> info
 ```
 
-The arm's IP is `robot.ip` in `sim2real/mirror.yaml`: `192.168.1.10` over USB, otherwise its Ethernet IP.
+The default IP is `robot.ip` in `sim2real/mirror.yaml`: `192.168.1.10` over USB, otherwise the arm's Ethernet IP.
+`goto home` uses the arm's stored **Home** action, like `example_move_to_home_position` in the lab demo.
 Close the Kinova Web App's Cartesian/joystick control (and any ROS driver) while the mirror sends commands.
 
 ## Use
