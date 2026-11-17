@@ -13,34 +13,42 @@ what the mirror needs:
 
 ## Install (no sudo, no virtualenv)
 
-Python 3.10 is the tested version. Install everything into your user site-packages:
+Tested with **Python 3.10** and **kortex_api 2.6.0** (the lab laptop's versions):
 
 ```bash
-git clone <this repo> && cd <repo>
+git clone https://github.com/SpaceIbrahim/gen3lite-sim2real.git && cd gen3lite-sim2real
 pip3 install --user -r requirements.txt
 ```
 
-Then install the **Kinova Kortex API** wheel, which is not on PyPI. Download `kortex_api-2.x...-py3-none-any.whl`
-(the link is in the README of github.com/Kinovarobotics/kortex), then:
+`requirements.txt` doesn't touch the Kortex API or protobuf. It keeps numpy below 2 so ROS 2 Python modules on the
+same machine keep working.
+
+Check that Kortex imports with this `python3`:
 
 ```bash
-pip3 install --user kortex_api-*.whl
-pip3 install --user "protobuf==3.20.3"      # Kortex needs protobuf 3.x; run this AFTER the wheel
+python3 -c "import google.protobuf as p, kortex_api; from kortex_api.autogen.messages import Base_pb2; print('protobuf', p.__version__, 'OK')"
 ```
 
-Notes:
-* `protobuf==3.20.3` in your user site-packages overrides any newer system protobuf for **your** Python only.
-  If another tool of yours needs protobuf 4+, it will see 3.20.3 too.
-* On Python 3.11+, if Kortex complains about protobuf descriptors, run with
-  `PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python`.
+* If that prints `OK`, you're done. The lab `demo.py` already works with this setup, so the mirror will too.
+* If it fails with `module 'collections' has no attribute 'MutableMapping'`, the protobuf it loads really is
+  **3.5.1**, which is too old for Python 3.10. Kortex 2.6 asks for exactly 3.5.1 in its metadata, but it works
+  with newer 3.x. Tested with **3.12.4 and 3.20.3**:
+  ```bash
+  pip3 install --user "protobuf==3.20.3"     # pip warns that kortex-api wants 3.5.1: ignore that
+  ```
+* No Kortex at all? Get `kortex_api-2.6.0.post3-py3-none-any.whl` from Kinova (link in the README of
+  github.com/Kinovarobotics/kortex), then:
+  ```bash
+  pip3 install --user kortex_api-2.6.0.post3-py3-none-any.whl deprecated "protobuf==3.20.3"
+  ```
 * If pip refuses with "externally-managed-environment" (Ubuntu 23.04+), add `--break-system-packages`.
   With `--user` this still only touches your home directory.
-* Without the Kortex wheel everything still works with `--real fake`, a simulated stand-in arm.
+* Without Kortex everything still works with `--real fake`, a simulated stand-in arm.
 
 Check the install without the robot:
 
 ```bash
-python3 -m pytest tests -q                        # 4 dry-run tests, ~10 s
+python3 -m pytest tests -q                        # dry-run + Kortex message tests, ~10 s
 python3 -m sim2real.mirror --real fake drive joint_sweep
 python3 -m sim2real.report sim2real/logs/<newest>_drive_joint_sweep.npz
 ```

@@ -1,7 +1,9 @@
-# pip3 install --user -r requirements.txt   (then the Kortex wheel + protobuf==3.20.3, see README)
+# pip3 install --user -r requirements.txt
+# Nothing here depends on protobuf, so the Kortex API / protobuf already installed stay untouched.
+# numpy < 2: numpy 2 in ~/.local would shadow the system numpy that ROS 2 (Ubuntu 22.04) modules are built for.
 mujoco>=3.17,<4
 gymnasium>=1.0
-numpy>=1.24
+numpy>=1.24,<2
 scipy>=1.10
 pyyaml>=6.0
 matplotlib>=3.6

@@ -23,10 +23,11 @@ simulation it needs (`drawer_rl/`, `configs/`, the MJCF) as a standalone repo. I
 no sudo or virtualenv needed. Full steps are in the exported README ([STANDALONE_README.md](STANDALONE_README.md)):
 
 ```bash
-pip3 install --user -r requirements.txt
-pip3 install --user kortex_api-*.whl              # the wheel from github.com/Kinovarobotics/kortex
-pip3 install --user "protobuf==3.20.3"            # Kortex needs protobuf 3.x
+pip3 install --user -r requirements.txt          # leaves kortex_api / protobuf alone; numpy kept < 2
 ```
+
+Tested with Python 3.10, kortex_api 2.6.0 and protobuf 3.12.4 / 3.20.3. Protobuf 3.5.1, the version Kortex 2.6
+pins, can't be imported on Python 3.10; the exported README says what to do.
 
 Connecting works like the lab's `kinova/manual/demo.py`: same `DeviceConnection` helper
 ([kortex_utilities.py](kortex_utilities.py)), with `--ip`, `-u` and `-p` arguments that default to `admin` / `admin`.
