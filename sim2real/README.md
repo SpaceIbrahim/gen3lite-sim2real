@@ -76,13 +76,18 @@ has protobuf 7, so `--real fake` works here but the Kortex API doesn't.)
 
 ## Command modes (`loop.command_mode`)
 
-* `independent` (default): each arm tracks the reference from its **own** measured state. This is what the deploy
-  loop does, so the remaining real−sim differences are what the policy will experience.
-* `feedforward`: both arms get only the reference **joint speed**, with no feedback. The sim integrates it into its
-  servo target like Kortex does. Raw speed gain, latency and drift show up clearly.
+* `tracking` (default): both arms get joint **speeds** `v_ref + kp·(q_ref − q_own)` (kp = 2/s), limited in speed
+  **and acceleration** to the arm's own limits (`info` reads them). The sim integrates its speed into its servo
+  target like Kortex does. Remaining real−sim differences are true response differences.
+* `feedforward`: both arms get only the reference speed, with no feedback. Raw speed gain, delay and drift show
+  up clearly.
+* `deploy`: the deploy loop's mapping (step `dq`, speed = `dq / servo_tau`, no acceleration limit). On the real arm
+  this **oscillated on joints 2–3** in the first lab session, see
+  `docs/lab_results_2026-11-17.md` in the drawerRL project (logs on branch `lab-results-2026-11-17-1`).
 
-Real joint speeds are `dq / servo_tau`, the same mapping as `DeltaController.joint_speed_command`. They are
-capped at `safety.max_joint_speed_deg_s`.
+The loop runs on wall time: the sim advances by the time that really passed (the real loop ran at ~13 Hz,
+not 20). A motion whose reference needs more joint acceleration than the arm allows is refused. Joint 2 and 3
+allow only 28.6 and 22.9 °/s²; lower `safety.speed_scale` if that happens.
 
 ## Safety built in
 
