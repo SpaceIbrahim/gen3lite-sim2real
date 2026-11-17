@@ -1,0 +1,73 @@
+{
+ "mode": "drive",
+ "motion": "pull",
+ "start": "rl_start",
+ "params": {
+  "reach_m": 0.12,
+  "pull_m": 0.15,
+  "speed_m_s": 0.1
+ },
+ "real": "kortex",
+ "speed_scale": 0.75,
+ "rate_hz": 20,
+ "command_mode": "tracking",
+ "kp": 2.0,
+ "accel_limits_deg_s2": [
+  57.3,
+  28.6,
+  22.9,
+  57.3,
+  572.96,
+  572.96
+ ],
+ "tool": [
+  0.0,
+  0.0,
+  0.12999999523162842,
+  0.0,
+  0.0,
+  90.0
+ ],
+ "segments": [
+  [
+   0.7333333333333334,
+   "approach (+x)"
+  ],
+  [
+   3.266666666666667,
+   "close gripper"
+  ],
+  [
+   4.866666666666667,
+   "pull (-x)"
+  ],
+  [
+   8.0,
+   "open gripper"
+  ],
+  [
+   9.6,
+   "return"
+  ]
+ ],
+ "aborted": "",
+ "overruns": 103,
+ "servo_tau": [
+  0.09230769230769231,
+  0.06666666666666667,
+  0.09230769230769231,
+  0.1,
+  0.1,
+  0.1
+ ],
+ "sim_torque_limits": [
+  10.0,
+  14.0,
+  10.0,
+  7.0,
+  7.0,
+  7.0
+ ],
+ "torque_sign_real": -1.0,
+ "wall_time_s": 12.677483362029307
+}
