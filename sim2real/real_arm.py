@@ -105,13 +105,14 @@ class KortexArm:
             return gripper_measure.finger[0].value
         return None
 
-    def read(self) -> RealState:
+    def read(self, gripper: bool = True) -> RealState:
+        """``gripper=False`` skips the extra gripper RPC (the mirror polls it only every few ticks)."""
         feedback = self.base_cyclic.RefreshFeedback()
         act = feedback.actuators[:6]
         q = wrap(np.radians([j.position for j in act]))           # Kortex: degrees, 0..360
         dq = np.radians([j.velocity for j in act])
         b = feedback.base
-        g = self.get_gripper()
+        g = self.get_gripper() if gripper else None
         fault = ""
         if getattr(b, "fault_bank_a", 0) or getattr(b, "fault_bank_b", 0):
             fault = f"base fault banks a={b.fault_bank_a} b={b.fault_bank_b}"
@@ -256,7 +257,8 @@ class FakeArm:
     name = "fake"
 
     def __init__(self, latency_steps=1, speed_gain=0.9, q_offset_deg=(0, 0, 0, 0, 0, 0), kp_scale=0.8,
-                 tool_transform=(0.0, 0.0, 0.13, 0.0, 0.0, 90.0), start_q=None, overrides=None):
+                 tool_transform=(0.0, 0.0, 0.13, 0.0, 0.0, 90.0), start_q=None, overrides=None,
+                 accel_limits_deg_s2=(57.3, 28.6, 22.9, 57.3, 573.0, 573.0)):
         self.sim = SimArm(overrides=overrides, cabinet=False)
         m, e = self.sim.m, self.sim.env
         m.actuator_gainprm[e.arm_act, 0] *= kp_scale
@@ -265,6 +267,8 @@ class FakeArm:
         self.q_off = np.radians(q_offset_deg)
         self.tool_transform = list(tool_transform)
         self._queue, self._v, self._g, self._tgt = [], np.zeros(6), 1.0, None
+        self._v_cmd = np.zeros(6)
+        self.a_max = np.radians(accel_limits_deg_s2)     # Kortex limits joint acceleration (measured 2026-11-17)
         self.sim.set_q(self.sim.q_home if start_q is None else start_q, grip=1.0)
         self._t0 = time.time()
 
@@ -274,13 +278,14 @@ class FakeArm:
     def close(self):
         self.stop()
 
-    def read(self) -> RealState:
+    def read(self, gripper: bool = True) -> RealState:
         s = self.sim
         return RealState(time.time(), wrap(s.q() + self.q_off), s.dq(), s.torque(), np.zeros(6), s.gripper(),
                          s.tool_pose(self.tool_transform))
 
     def info(self) -> dict:
-        return {"hard_limits": {"joint_speed_deg_s": [57.3] * 6, "twist_linear_m_s": 0.25},
+        return {"hard_limits": {"joint_speed_deg_s": [57.3] * 6, "twist_linear_m_s": 0.25,
+                                "joint_accel_deg_s2": np.degrees(self.a_max).tolist()},
                 "tool_transform": self.tool_transform, "arm_state": "FAKE",
                 "home_action_deg": self.home_angles_deg()}
 
@@ -293,7 +298,7 @@ class FakeArm:
     def send_joint_speeds(self, v) -> None:
         self._queue.append(np.asarray(v, float) * self.gain)
         if len(self._queue) > self.latency:
-            self._v = self._queue.pop(0)
+            self._v_cmd = self._queue.pop(0)
 
     def send_gripper(self, g_open) -> None:
         self._g = float(g_open)
@@ -304,6 +309,7 @@ class FakeArm:
         s = self.sim
         if self._tgt is None:
             self._tgt = s.q()
+        self._v = np.clip(self._v_cmd, self._v - self.a_max * dt, self._v + self.a_max * dt)
         self._tgt = np.clip(self._tgt + self._v * dt, s.q_limits[:, 0], s.q_limits[:, 1])
         s.command_target(self._tgt, None)
         e = s.env
@@ -332,7 +338,7 @@ class FakeArm:
         return True
 
     def stop(self) -> None:
-        self._queue, self._v, self._tgt = [], np.zeros(6), None
+        self._queue, self._v, self._v_cmd, self._tgt = [], np.zeros(6), np.zeros(6), None
         self.sim.hold()
 
     def __enter__(self):

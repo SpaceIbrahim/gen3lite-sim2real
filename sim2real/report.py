@@ -49,9 +49,21 @@ def first_reach(t, x, start_idx, target, tol=0.1):
     return np.nan if len(idx) == 0 else t[start_idx + idx[0]] - t[start_idx]
 
 
+def torque_sign(meta):
+    """Kortex reports joint torque with the opposite sign to MuJoCo (lab run 2026-11-17).  Old logs lack the key."""
+    return meta.get("torque_sign_real", -1.0 if meta.get("real") == "kortex" else 1.0)
+
+
+def time_base(D, meta):
+    """Seconds.  Old real-arm logs counted fixed ticks in ``t`` although the loop ran slower: use wall time."""
+    if meta.get("real") == "kortex" and "t_wall" in D and "dt" not in D:
+        return D["t_wall"]
+    return D["t"]
+
+
 def drive_summary(D, meta):
-    t = D["t"]
-    dt = t[1] - t[0]
+    t = time_base(D, meta)
+    dt = float(np.median(np.diff(t)))
     qr, qs, qref = (np.degrees(D[k]) for k in ("q_real", "q_sim", "q_ref"))
     vr, vs = np.degrees(D["dq_real"]), np.degrees(D["dq_sim"])
     moving_ref = np.r_[np.abs(np.diff(qref, axis=0)).max(axis=1) > 1e-4, False]
@@ -63,7 +75,7 @@ def drive_summary(D, meta):
         d_rs, d_rr = wrapd(qr[:, j] - qs[:, j]), wrapd(qr[:, j] - qref[:, j])
         mv = np.abs(vs[:, j]) > 2.0
         gain = (np.dot(vr[mv, j], vs[mv, j]) / np.dot(vs[mv, j], vs[mv, j])) if mv.sum() > 5 else np.nan
-        tr, ts = D["torque_real"][still, j], D["torque_sim"][still, j]
+        tr, ts = torque_sign(meta) * D["torque_real"][still, j], D["torque_sim"][still, j]
         rows.append({
             "joint": j + 1,
             "rms_real_minus_sim_deg": float(np.sqrt(np.mean(d_rs ** 2))),
@@ -93,8 +105,12 @@ def drive_summary(D, meta):
         for k, key in (("real", "grip_real"), ("sim", "grip_sim")):
             g[k].append(first_reach(t, D[key], i, gref[end]))
     out["gripper_s"] = {k: [round(float(x), 2) for x in v] for k, v in g.items()}
+    tw = D["t_wall"] if "t_wall" in D else t
     out["loop_ms"] = {"median": float(np.median(D["loop_ms"])), "max": float(D["loop_ms"].max()),
-                      "overruns": meta.get("overruns", 0)}
+                      "overruns": meta.get("overruns", 0),
+                      "period_median": 1000 * float(np.median(np.diff(tw))) if len(tw) > 1 else float("nan"),
+                      "read_median": float(np.median(D["read_ms"])) if "read_ms" in D else float("nan"),
+                      "send_median": float(np.median(D["send_ms"])) if "send_ms" in D else float("nan")}
     out["sim_contacts_steps"] = int(D["contact_sim"].sum())
     return out
 
@@ -114,8 +130,9 @@ def to_md(s, meta, log):
     L += ["", f"* Tool pose reported by the arm vs sim FK of the same joints: median {s['tool_fk_error_mm']['median']:.1f} mm, "
           f"max {s['tool_fk_error_mm']['max']:.1f} mm",
           f"* Gripper time to reach each command (s): real {s['gripper_s']['real']}, sim {s['gripper_s']['sim']}",
-          f"* Loop time: median {s['loop_ms']['median']:.1f} ms, max {s['loop_ms']['max']:.1f} ms, "
-          f"{s['loop_ms']['overruns']} overruns",
+          f"* Loop: real period median {s['loop_ms']['period_median']:.0f} ms (target {1000 / meta.get('rate_hz', 20):.0f}), "
+          f"work median {s['loop_ms']['median']:.1f} ms (read {s['loop_ms']['read_median']:.1f}, send "
+          f"{s['loop_ms']['send_median']:.1f}), max {s['loop_ms']['max']:.1f} ms, {s['loop_ms']['overruns']} overruns",
           f"* Sim arm in contact with table / itself: {s['sim_contacts_steps']} steps", "",
           "How to read it: lag > ~60 ms or speed gain outside 0.8–1.2 means the simulated servo "
           "(configs/robot.yaml actuator gains, task.yaml latency randomisation) does not match the real joint. "
@@ -125,7 +142,7 @@ def to_md(s, meta, log):
 
 
 def plot_drive(D, meta, out):
-    t = D["t"]
+    t = time_base(D, meta)
     fig, axs = plt.subplots(4, 2, figsize=(14, 13), sharex=True)
     for j in range(6):
         a = axs.flat[j]
@@ -190,9 +207,19 @@ def follow_report(D, meta, out_png):
           f"* Sim contacts: table {int(D['contact_table'].sum())}, cabinet {int(D['contact_cabinet'].sum())}, "
           f"self {int(D['contact_self'].sum())} samples"]
     # static gravity check: real torque estimate vs sim gravity torque (sign and size)
-    tr, tg = D["torque_real"], D["torque_gravity_sim"]
+    tr, tg = torque_sign(meta) * D["torque_real"], D["torque_gravity_sim"]
+    qd = np.degrees(D["q_real"])
+    still = np.r_[True, np.abs(np.diff(qd, axis=0)).max(axis=1) < 0.05]
+    fits = []
+    for j in range(6):
+        x, y = tg[still, j], tr[still, j]
+        if len(x) > 20 and np.std(x) > 0.1:
+            k, c = np.linalg.lstsq(np.vstack([x, np.ones_like(x)]).T, y, rcond=None)[0]
+            fits.append(f"j{j + 1}: real = {k:.2f} x sim {c:+.2f} N·m (corr {np.corrcoef(x, y)[0, 1]:.2f})")
+    if fits:
+        md.append("* Holding still, real torque vs sim gravity torque (1.0 x = sim masses right): " + "; ".join(fits))
     if np.abs(tr).max() > 0:
-        md.append("* Joint torque, real estimate vs sim gravity torque (mean over the log, N·m): " + ", ".join(
+        md.append("* Joint torque, real estimate (sign flipped to MuJoCo's) vs sim gravity torque (mean, N·m): " + ", ".join(
             f"j{j + 1} {tr[:, j].mean():.2f}/{tg[:, j].mean():.2f}" for j in range(6)))
     return "\n".join(md)
 

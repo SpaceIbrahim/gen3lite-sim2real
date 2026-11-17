@@ -228,6 +228,7 @@ def cmd_follow(args, cfg):
     if viewer is not None:
         viewer.close()
     p = save_log(cfg, "follow", log, {"mode": "follow", "tool": tool, "real": args.real,
+                                      "torque_sign_real": cfg["robot"].get("torque_sign", 1.0) if args.real == "kortex" else 1.0,
                                       "rate_hz": cfg["loop"]["rate_hz"], "overruns": rate.overruns})
     e = np.array(log["err_mm"]) if log["err_mm"] else np.zeros(1)
     print(f"tool-pose error real vs sim FK: median {np.median(e):.2f} mm, max {e.max():.2f} mm  -> {p}")
@@ -276,12 +277,25 @@ def cmd_goto(args, cfg):
 
 
 # --------------------------------------------------------------------------------- drive
+def _accel_limits(real, cfg) -> np.ndarray:
+    """Joint acceleration limits (rad/s^2): the arm's own hard limits if it reports them, else mirror.yaml."""
+    a = np.radians(cfg["safety"]["max_joint_accel_deg_s2"]).astype(float)
+    hl = real.info().get("hard_limits")
+    rep = hl.get("joint_accel_deg_s2") if isinstance(hl, dict) else None
+    if rep and len(rep) == 6:
+        a = np.minimum(a, np.radians(rep))
+    return a
+
+
 def cmd_drive(args, cfg):
     S, L = cfg["safety"], cfg["loop"]
     sim = SimArm(cfg["sim"]["overrides"], cfg["sim"]["cabinet"])
     shadow = SimArm(cfg["sim"]["overrides"], cfg["sim"]["cabinet"])     # kinematic copy of the REAL arm
     period = 1.0 / L["rate_hz"]
     q_start = named_pose(args.start, sim) if args.start != "current" else None
+    mode = {"independent": "deploy"}.get(L["command_mode"], L["command_mode"])
+    if mode not in ("tracking", "feedforward", "deploy"):
+        raise SystemExit("loop.command_mode must be 'tracking', 'feedforward' or 'deploy'")
 
     with make_real(args, cfg, start_q=q_start) as real:
         rs = real.read()
@@ -300,67 +314,98 @@ def cmd_drive(args, cfg):
                              f"`python -m sim2real.mirror goto {args.start}` first")
         scale = float(S["speed_scale"])
         T = mo.duration / scale
+        a_max = _accel_limits(real, cfg)
+        vmax = np.radians(S["max_joint_speed_deg_s"])
+        # the reference itself must be feasible for the real arm (Kortex limits joint acceleration)
+        if mo.name != "steps":
+            v_ref_all = np.gradient(mo.q, mo.t, axis=0) * scale
+            a_ref = np.abs(np.gradient(v_ref_all, mo.t / scale, axis=0)).max(axis=0)
+            bad = np.where(a_ref > a_max)[0]
+            if len(bad):
+                raise SystemExit("refusing: the reference needs more joint acceleration than the arm allows: " + ", ".join(
+                    f"joint_{j + 1} {np.degrees(a_ref[j]):.0f} > {np.degrees(a_max[j]):.0f} deg/s^2" for j in bad) +
+                    "\nlower safety.speed_scale or the motion's speed")
         exc = np.degrees(np.abs(mo.q - mo.q0).max(axis=0)).round(1)
         confirm(args, f"Motion '{mo.name}' from '{args.start}': {T:.1f} s at speed scale {scale}, "
                       f"max joint excursion {exc.tolist()} deg, joint speed cap {S['max_joint_speed_deg_s']} deg/s, "
-                      f"command mode '{L['command_mode']}'.")
+                      f"command mode '{mode}'.")
         tool = tool_transform_of(real)
-        vmax = np.radians(S["max_joint_speed_deg_s"])
+        kp = float(L.get("kp", 2.0))
         dq_cap = vmax * sim.servo_tau
         sim.set_q(rs.q, None if np.isnan(rs.gripper) else rs.gripper)
         g_sim = sim.gripper()
-        if L["command_mode"] not in ("independent", "feedforward"):
-            raise SystemExit("loop.command_mode must be 'independent' or 'feedforward'")
-        feedforward = L["command_mode"] == "feedforward"
         q_tgt_sim = sim.q()
+        v_prev = {"real": np.zeros(6), "sim": np.zeros(6)}
         g_speed = sim.env.tc["control"].get("gripper_max_speed", 1.5)
-        names = ("t", "t_wall", "q_ref", "q_real", "q_sim", "dq_real", "dq_sim", "v_cmd_real", "dq_cmd_real", "dq_cmd_sim",
-                 "torque_real", "torque_sim", "current_real", "grip_ref", "grip_real", "grip_sim", "tool_real",
-                 "tool_sim_fk_of_real", "tool_sim", "contact_sim", "loop_ms")
+        grip_every = max(1, int(L.get("gripper_read_every", 4)))
+        names = ("t", "t_wall", "dt", "q_ref", "v_ref", "q_real", "q_sim", "dq_real", "dq_sim", "v_cmd_real", "v_cmd_sim",
+                 "dq_cmd_real", "dq_cmd_sim", "torque_real", "torque_sim", "current_real", "grip_ref", "grip_real",
+                 "grip_sim", "tool_real", "tool_sim_fk_of_real", "tool_sim", "contact_sim", "loop_ms", "read_ms", "send_ms")
         log = {k: [] for k in names}
         abort, rate, last_grip = "", Rate(L["rate_hz"]), None
-        n_ticks = int(np.ceil(T / period)) + int(1.0 / period)          # + 1 s to settle at the end
         tq_lim = S["abort_torque_fraction"] * sim.torque_limits
+        fake = args.real == "fake"
+
+        def law(q_own, q_ref, v_ref, dt, who):
+            """Joint speed command for one arm (rad/s), limited like the real arm (speed + acceleration)."""
+            if mode == "feedforward":
+                v = v_ref
+            else:
+                v = v_ref + kp * wrap(q_ref - q_own)
+            v = np.clip(v, -vmax, vmax)
+            v = np.clip(v, v_prev[who] - a_max * dt, v_prev[who] + a_max * dt)
+            v_prev[who] = v
+            return v
+
         t0 = time.perf_counter()
+        t_prev, elapsed, k, grip_cache = t0, 0.0, 0, np.nan
         try:
-            for k in range(n_ticks):
+            while elapsed < T + 1.0:                       # + 1 s to settle at the end
                 tic = time.perf_counter()
-                rs = real.read()
-                if args.real == "fake":
-                    rs.t = k * period
-                tr = min((k + 1) * period * scale, mo.duration)
+                dt = period if fake else float(np.clip(tic - t_prev, 1e-3, 3 * period))
+                t_prev = tic
+                elapsed = k * period if fake else tic - t0
+                rs = real.read(gripper=(k % grip_every == 0))
+                if np.isnan(rs.gripper):
+                    rs.gripper = grip_cache
+                grip_cache = rs.gripper
+                t_read = time.perf_counter()
+                # reference one control period ahead (in reference time = wall time * speed_scale)
+                tr = min((elapsed + period) * scale, mo.duration)
                 q_ref = np.array([np.interp(tr, mo.t, mo.q[:, j]) for j in range(6)])
+                q_ref_prev = np.array([np.interp(max(tr - period * scale, 0), mo.t, mo.q[:, j]) for j in range(6)])
+                v_ref = (q_ref - q_ref_prev) / period
                 g_ref = float(np.interp(tr, mo.t, mo.grip))
                 q_r, q_s = rs.q, sim.q()
-                if feedforward:   # both arms get the reference SPEED, no feedback: pure command response
-                    q_ref_now = np.array([np.interp(tr - period * scale, mo.t, mo.q[:, j]) for j in range(6)])
-                    v_r = np.clip((q_ref - q_ref_now) / period, -vmax, vmax)
-                    dq_r = v_r * sim.servo_tau
-                    q_tgt_sim = q_tgt_sim + v_r * period      # the sim integrates it like Kortex does
-                    dq_s = q_tgt_sim - q_s
-                else:             # each arm tracks the reference from its own state (the deploy loop's way)
+                if mode == "deploy":    # the deploy loop's mapping: step dq, speed = dq / servo_tau (no accel limit)
                     dq_r = np.clip(wrap(q_ref - q_r), -dq_cap, dq_cap)
                     v_r = np.clip(dq_r / sim.servo_tau, -vmax, vmax)
                     dq_s = np.clip(q_ref - q_s, -dq_cap, dq_cap)
+                    v_s = dq_s / sim.servo_tau
+                else:                   # both arms velocity-commanded with the same law and limits
+                    v_r, v_s = law(q_r, q_ref, v_ref, dt, "real"), law(q_s, q_ref, v_ref, dt, "sim")
+                    dq_r, dq_s = v_r * dt, v_s * dt
                 real.send_joint_speeds(v_r)
                 if last_grip is None or abs(g_ref - last_grip) > 1e-3:
                     real.send_gripper(g_ref)
                     last_grip = g_ref
-                g_sim += np.clip(g_ref - g_sim, -g_speed * period, g_speed * period)
-                if feedforward:
-                    sim.command_target(q_tgt_sim, g_sim)
-                else:
+                t_send = time.perf_counter()
+                g_sim += np.clip(g_ref - g_sim, -g_speed * dt, g_speed * dt)
+                if mode == "deploy":
                     sim.command(dq_s, g_sim)
-                # log the state at the START of the period, with the commands sent during it
+                else:                   # the sim integrates its speed command into its servo target, like Kortex
+                    q_tgt_sim = q_tgt_sim + v_s * dt
+                    sim.command_target(q_tgt_sim, g_sim)
                 shadow.set_q(q_r)
                 mujoco.mj_collision(sim.m, sim.d)
                 c = sim.contacts()
-                vals = dict(t=k * period, t_wall=time.perf_counter() - t0, q_ref=q_ref, q_real=q_r, q_sim=q_s, dq_real=rs.dq, dq_sim=sim.dq(),
-                            v_cmd_real=v_r, dq_cmd_real=dq_r, dq_cmd_sim=dq_s, torque_real=rs.torque,
-                            torque_sim=sim.torque(), current_real=rs.current, grip_ref=g_ref, grip_real=rs.gripper,
-                            grip_sim=sim.gripper(), tool_real=rs.tool_pose, tool_sim_fk_of_real=shadow.tool_pose(tool),
-                            tool_sim=sim.tool_pose(tool), contact_sim=c["table"] or c["self"],
-                            loop_ms=1000 * (time.perf_counter() - tic))
+                vals = dict(t=elapsed, t_wall=tic - t0, dt=dt, q_ref=q_ref, v_ref=v_ref, q_real=q_r, q_sim=q_s,
+                            dq_real=rs.dq, dq_sim=sim.dq(), v_cmd_real=v_r, v_cmd_sim=v_s, dq_cmd_real=dq_r,
+                            dq_cmd_sim=dq_s, torque_real=rs.torque, torque_sim=sim.torque(), current_real=rs.current,
+                            grip_ref=g_ref, grip_real=rs.gripper, grip_sim=sim.gripper(), tool_real=rs.tool_pose,
+                            tool_sim_fk_of_real=shadow.tool_pose(tool), tool_sim=sim.tool_pose(tool),
+                            contact_sim=c["table"] or c["self"], loop_ms=1000 * (time.perf_counter() - tic),
+                            read_ms=1000 * (t_read - tic), send_ms=1000 * (t_send - t_read))
                 for kk, v in vals.items():
                     log[kk].append(v)
                 # ---- safety
@@ -375,19 +420,21 @@ def cmd_drive(args, cfg):
                     abort = f"real and simulated arms {div:.1f} deg apart"
                 elif mg.min() < S["abort_margin_deg"]:
                     abort = f"joint_{mg.argmin() + 1} {mg.min():.1f} deg from its sim limit"
-                elif np.any(np.abs(rs.torque) > tq_lim) and args.real != "fake":
+                elif np.any(np.abs(rs.torque) > tq_lim) and not fake:
                     j = int(np.argmax(np.abs(rs.torque) / tq_lim))
                     abort = f"joint_{j + 1} torque {rs.torque[j]:.1f} N*m above {tq_lim[j]:.1f}"
                 if abort:
-                    print(f"\nABORT at t={k * period:.2f}s: {abort}")
+                    print(f"\nABORT at t={elapsed:.2f}s: {abort}")
                     break
-                sim.tick(period)
-                if args.real == "fake":
+                # the simulated arm advances by the time the real arm actually had (not a fixed period)
+                sim.tick(period if fake else max(period, time.perf_counter() - tic))
+                if fake:
                     real.advance(period)
                 if k % max(1, int(L["rate_hz"] / 2)) == 0:
-                    print(f"\r t={k * period:5.1f}/{T:.1f}s  track {track:4.1f} deg  real-sim {div:4.1f} deg  ",
-                          end="", flush=True)
-                if args.real != "fake":
+                    print(f"\r t={elapsed:5.1f}/{T:.1f}s  track {track:4.1f} deg  real-sim {div:4.1f} deg  "
+                          f"loop {1000 * dt:4.0f} ms ", end="", flush=True)
+                k += 1
+                if not fake:
                     rate.sleep()
         except KeyboardInterrupt:
             abort = "stopped by user (Ctrl+C)"
@@ -396,12 +443,17 @@ def cmd_drive(args, cfg):
             real.stop()
     print()
     meta = {"mode": "drive", "motion": mo.name, "start": args.start, "params": params, "real": args.real,
-            "speed_scale": scale, "rate_hz": L["rate_hz"], "command_mode": L["command_mode"], "tool": tool,
+            "speed_scale": scale, "rate_hz": L["rate_hz"], "command_mode": mode, "kp": kp,
+            "accel_limits_deg_s2": np.degrees(a_max).round(2).tolist(), "tool": tool,
             "segments": [(t / scale, s) for t, s in mo.segments], "aborted": abort, "overruns": rate.overruns,
             "servo_tau": sim.servo_tau.tolist(), "sim_torque_limits": sim.torque_limits.tolist(),
-            "wall_time_s": time.perf_counter() - t0}
+            "torque_sign_real": cfg["robot"].get("torque_sign", 1.0) if args.real == "kortex" else 1.0, "wall_time_s": time.perf_counter() - t0}
     p = save_log(cfg, f"drive_{mo.name}", log, meta)
-    print(f"log: {p}\nreport: python -m sim2real.report {p.relative_to(PROJECT_ROOT)}")
+    try:
+        shown = p.relative_to(PROJECT_ROOT)
+    except ValueError:
+        shown = p
+    print(f"log: {p}\nreport: python -m sim2real.report {shown}")
     return p
 
 

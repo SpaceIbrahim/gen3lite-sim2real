@@ -1,6 +1,8 @@
 # Settings for python -m sim2real.mirror (any value can be overridden with --set key=value).
 
 robot:
+  # Kortex joint torque = -1 x MuJoCo joint torque (same size: lab run 2026-11-17, gravity-hold regression)
+  torque_sign: -1.0
   ip: 192.168.1.10          # Gen3 Lite over USB (RNDIS) is 192.168.1.10; over Ethernet use the arm's own IP
                             # (or pass --ip).  Login: -u / -p on the command line, default admin / admin.
 
@@ -9,15 +11,23 @@ sim:
   overrides: []             # extra config overrides for the simulated arm, e.g. ["robot.actuator_overrides.a_joint_2.kp=900"]
 
 loop:
-  rate_hz: 20               # the policy's control rate
-  # independent: each arm tracks the reference from ITS OWN measured state (what the deploy loop does)
-  # feedforward: both arms get the reference joint SPEED only (no feedback, identical commands); the sim
-  #              integrates it into its servo target like Kortex does.  Shows raw speed gain / lag / drift.
-  command_mode: independent
+  rate_hz: 20               # target control rate.  The real loop measured ~13 Hz on 2026-11-17 (Kortex RPCs);
+                            # the sim is advanced by the time that really passed, so a slower loop stays comparable.
+  # tracking   : (default) both arms get joint SPEEDS  v = v_ref + kp * (q_ref - q_own), limited in speed AND
+  #              acceleration like Kortex; the sim integrates its speed into its servo target like Kortex does.
+  # feedforward: both arms get only the reference speed (no feedback): raw speed gain / lag / drift.
+  # deploy     : the deploy loop's mapping (step dq, speed = dq / servo_tau, no acceleration limit).  On the real
+  #              arm this OSCILLATED on joints 2-3 (lab run 2026-11-17, docs/lab_results_2026-11-17.md).
+  command_mode: tracking
+  kp: 2.0                   # 1/s, position feedback gain for tracking mode (real arm lag ~0.1-0.6 s: keep it low)
+  gripper_read_every: 4     # ticks between gripper position reads (each read is an extra Kortex RPC)
 
 safety:
   speed_scale: 0.5          # motions run this much slower than their nominal speed (1.0 = nominal)
   max_joint_speed_deg_s: 30 # hard cap on any joint speed command sent to the real arm
+  # Joint acceleration limits of the real Gen3 Lite (Kortex hard limits, read by `info` on 2026-11-17).
+  # The arm's own reported limits are used when available; these are the fallback / upper bound.
+  max_joint_accel_deg_s2: [57.3, 28.6, 22.9, 57.3, 573.0, 573.0]
   joint_margin_deg: 10      # motions must keep every joint this far from its limit (pre-check)
   min_tcp_height_m: 0.05    # motions must keep the TCP this high above the table (pre-check)
   start_tol_deg: 3          # the real arm must be this close to a motion's start pose (else: goto first)
@@ -34,8 +44,8 @@ motions:                    # default parameters (see sim2real/trajectories.py)
   gripper: {cycles: 2}
 
 fake:                       # the stand-in "real" arm for --real fake (deliberate differences)
-  latency_steps: 1
-  speed_gain: 0.9
+  latency_steps: 2           # 100 ms: the real arm responded after 75-150 ms (lab run 2026-11-17)
+  speed_gain: 1.0           # real unsaturated joints followed speed commands with gain ~0.98
   q_offset_deg: [0, 0, 0, 0, 0.5, 0]
   kp_scale: 0.8
 
