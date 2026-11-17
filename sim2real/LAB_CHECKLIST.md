@@ -66,9 +66,10 @@ the robot's right, facing the robot, overhanging the table edge by ~11 cm.
 1. Run `goto rl_start`. The open gripper should point straight at the drawer, about 20 cm in front of the handle.
 2. Jog the gripper (open, level, pointing +x) until the handle bar sits centred between the finger pads, as if
    grasping. Read the tool pose.
-   * Sim expects the tool frame at about **x 0.552, y −0.180, z 0.383 m**: the handle centre (0.5595, −0.180, 0.3825),
-     minus the 8 mm between the tool frame and the RL TCP. **With the ~5 cm mount, expect z ≈ 0.333 m**: the cabinet
-     stands on the table, 5 cm below the base.
+   * Without the mount it would be **x 0.552, y −0.180, z 0.383 m**: the handle centre (0.5595, −0.180, 0.3825),
+     minus the 8 mm between the tool frame and the RL TCP. The v8 sim includes the 5 cm mount, so it now expects
+     **x 0.552, y −0.180, z 0.333 m** (handle centre 0.5595, −0.180, 0.3325), because the cabinet stands on the
+     table, 5 cm below the base.
    * Differences tell you how far the real cabinet is from the sim's, and give the handle height.
 3. Close the gripper on the bar. Note the **gripper reading** in the Web App. The deploy code treats < 0.4 as
    "closed on something", and the sim's fingers stop at the 1.1 cm bar.

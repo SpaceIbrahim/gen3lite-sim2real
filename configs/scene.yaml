@@ -1,6 +1,7 @@
 # =============================================================================
 # World / scene layout.  All positions are in the ROBOT BASE frame unless noted:
-#   origin = centre of the robot's base on the table surface, +x forward, +z up.
+#   origin = centre of the bottom of the robot's base (on its mount, table.robot_mount_height above the
+#   table top), +x forward, +z up.
 # =============================================================================
 
 table:
@@ -10,6 +11,11 @@ table:
   # left (+y), 54.5 cm to its right (-y).  Base diameter 10.5 cm (120.5 - 83.5 - 26.5), so from the
   # base CENTRE: +x 0.8875, -x 0.3175, +y 0.7625, -y 0.5975 m.
   height: 0.75              # floor -> table top (m)  (ASSUMED -- not measured; only moves the floor)
+  # v8: the robot stands on a mount ~5 cm above the table (lab 2026-11-17).  The cabinet stands on the table,
+  # so relative to the robot base the table, cabinet and handle are this much LOWER.  Measure exactly with
+  # sim2real/LAB_CHECKLIST.md B.2 (mount = 26 mm - tool z with the fingertips on the table).
+  robot_mount_height: 0.05  # (APPROXIMATE)
+  robot_mount_radius: 0.0525  # the 10.5 cm footprint measured on the table
   size: [1.205, 1.36]       # x, y (m)
   thickness: 0.04
   # where the robot sits on the table: robot base position relative to table centre
@@ -30,7 +36,7 @@ drawer_placement:
   y: -0.18                  # 18 cm to the robot's RIGHT of straight ahead.  Straight ahead (y = 0) puts the
                             # wrist on a singularity (joint 5 near 0): huge wrist speeds and no clockwise
                             # drawer rotation.  Offset: full +/-15 deg at every distance (see docs).
-  z: 0.0                    # 0 = standing on the table
+  z: 0.0                    # 0 = standing on the table (which is robot_mount_height below the base)
   yaw_deg: 0.0
 
 physics:

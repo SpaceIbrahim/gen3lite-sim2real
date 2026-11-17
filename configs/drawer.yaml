@@ -45,6 +45,9 @@ top_drawer:
     max_travel: 0.30      # (ASSUMED) how far the drawer can be pulled out
     damping: 8.0          # N/(m/s) viscous resistance          (ASSUMED)
     frictionloss: 3.0     # N   Coulomb friction (force to start moving) (ASSUMED)
+    # v8 (audit recommendation 2): extra Coulomb friction per newton of sideways + vertical load on the handle,
+    # so pulling the drawer crooked / wedging the handle jams it like a real drawer.  0 = rigid slide (v1-v7).
+    side_load_friction: 0.25  # (ASSUMED) N of friction per N of side load
     armature: 0.0
     stiffness: 0.0        # >0 adds a spring pulling the drawer shut
     stiffness_ref: 0.0

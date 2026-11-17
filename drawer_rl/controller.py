@@ -6,10 +6,19 @@ joint-position target for the next control period:
     action -> TCP target (accumulated, never further than ``lead`` from the measured
               TCP) -> damped-least-squares IK step -> joint target q + dq
 
-In simulation the joint target goes to MuJoCo's position actuators (drawer_rl/env.py).
-On the real arm ``dq / dt`` is sent as a joint-speed command (drawer_deploy/).  Because
-both use this one class, the hidden controller state (target lead, target yaw, gripper
-command) is identical in sim and real, and can be shown to the policy as observations.
+Two actuation models (``control.actuation``):
+
+* ``position`` (v1-v7): the IK step dq becomes a joint target q + dq for MuJoCo's position servos.
+* ``velocity`` (v8+): the controller outputs JOINT SPEEDS, like the real Kortex joint-speed
+  interface: feedforward (the target's motion this step) + low-gain feedback (``velocity_kp`` x the
+  target lead), limited per joint in speed AND acceleration (``joint_max_accel``, the Gen3 Lite's
+  Kortex limits).  The sim integrates the speed into its servo target, as Kortex does internally.
+  This is the model the mirror tool validated on the real arm (0.1-0.3 deg from sim, lab
+  2026-11-17); the old ``dq / servo_tau`` speed mapping oscillated on joints 2-3 there.
+  On the real arm ``joint_speed_command()`` returns the speed to send.
+
+Because sim and real use this one class, the hidden controller state (target lead, target yaw,
+gripper command, commanded speed) is identical in both and can be shown to the policy.
 
 ``data`` must hold the MEASURED joint positions with kinematics up to date
 (mj_kinematics + mj_comPos, or mj_forward / mj_step).
@@ -54,6 +63,17 @@ class DeltaController:
         self.servo_tau = np.full(len(arm_qadr), dt) if servo_tau is None else np.asarray(servo_tau, float)
         jms = cc.get("joint_max_speed")
         self.joint_max_speed = None if jms is None else np.broadcast_to(np.asarray(jms, float), (len(arm_qadr),)).copy()
+        # actuation model (see module docstring).  Configs without the key (v1-v7 runs) keep "position".
+        self.actuation = cc.get("actuation", "position")
+        if self.actuation not in ("position", "velocity"):
+            raise ValueError(f"control.actuation must be 'position' or 'velocity', not {self.actuation!r}")
+        jma = cc.get("joint_max_accel")
+        self.joint_max_accel = None if jma is None else np.broadcast_to(np.asarray(jma, float), (len(arm_qadr),)).copy()
+        self.velocity_kp = float(cc.get("velocity_kp", 2.0))          # 1/s, feedback on the target lead
+        self.servo_max_lag = float(cc.get("servo_max_lag", 0.1))      # rad, sim servo target vs measured q
+        self.v_cmd = np.zeros(len(arm_qadr))                          # joint speed sent this step (rad/s)
+        self._unwind = np.zeros(len(arm_qadr))                        # relax(): servo-target correction (rad)
+        self.q_cmd = np.zeros(len(arm_qadr))                          # integrated speed = sim servo target
         self.tcp_target = np.zeros(3)
         self.R_target = R_nominal.copy()
         self.tcp_yaw = 0.0
@@ -66,6 +86,9 @@ class DeltaController:
         self.R_target = self.R_nominal.copy()
         self.tcp_yaw = 0.0
         self.q_target = data.qpos[self.arm_qadr].copy()
+        self.q_cmd = self.q_target.copy()
+        self.v_cmd = np.zeros(len(self.arm_qadr))
+        self._unwind = np.zeros(len(self.arm_qadr))
         if grip_ctrl is not None:
             self.grip_cmd = float(grip_ctrl)
 
@@ -86,7 +109,8 @@ class DeltaController:
 
     def relax(self, data, keep_axis: np.ndarray | None = None) -> None:
         """Safety reflex: pull the target back onto the measured hand so the arm stops pushing.
-        ``keep_axis`` (world unit vector) keeps the lead along that direction (e.g. the drawer axis)."""
+        ``keep_axis`` (world unit vector) keeps the lead along that direction (e.g. the drawer axis;
+        with velocity actuation only the pulling sense of the servo push is kept)."""
         cur = self.tcp.pos(data)
         lead = self.tcp_target - cur
         keep = np.zeros(3) if keep_axis is None else keep_axis * float(lead @ keep_axis)
@@ -94,6 +118,20 @@ class DeltaController:
         if self.rot_mode == "yaw":
             self.tcp_yaw = float(np.clip(self.measured_yaw(data), -self.max_yaw, self.max_yaw))
             self.R_target = self.yaw_rotation(self.tcp_yaw) @ self.R_nominal
+        if self.actuation == "velocity":
+            # The arm's own integrated target (Kortex internally, or the sim servo target) also pushes.  It can
+            # only be pulled back through the SPEED command, so the next step adds the speed that unwinds it
+            # (acceleration-limited like every command), keeping only the part along keep_axis.
+            q = data.qpos[self.arm_qadr]
+            if keep_axis is None:
+                want = q.copy()
+            else:
+                J = self.tcp.jacobian(self.m, data, self.arm_dadr)
+                d_tcp = J[:3] @ (self.q_cmd - q)
+                # keep the PULL only: a push into the drawer (fingertips on the front) is released too
+                e = np.concatenate([keep_axis * max(0.0, float(d_tcp @ keep_axis)), np.zeros(3)])
+                want = q + dls_step(J, e, self.cc["ik_damping"])
+            self._unwind = want - self.q_cmd
 
     # ------------------------------------------------------------------- step
     def _limit_speed(self, dq: np.ndarray) -> np.ndarray:
@@ -105,11 +143,32 @@ class DeltaController:
         lim = self.joint_max_speed * self.servo_tau
         return np.clip(dq, -lim, lim)
 
-    def joint_speed_command(self, dq: np.ndarray) -> np.ndarray:
-        """Joint speeds (rad/s) that make a real velocity-controlled arm follow ``dq`` the way the
-        simulated position servo does."""
+    def joint_speed_command(self, dq: np.ndarray | None = None) -> np.ndarray:
+        """Joint speeds (rad/s) to send to a real velocity-controlled arm this step.
+
+        ``velocity`` actuation: the speed the controller computed (``dq`` is ignored); speed- and
+        acceleration-limited exactly like in training.  ``position`` actuation (v1-v7 policies):
+        ``dq / servo_tau``, which mimics the sim servo but OSCILLATED on the real arm (lab 2026-11-17)."""
+        if self.actuation == "velocity":
+            return self.v_cmd.copy()
         v = np.asarray(dq, float) / self.servo_tau
         return v if self.joint_max_speed is None else np.clip(v, -self.joint_max_speed, self.joint_max_speed)
+
+    def _velocity_command(self, v: np.ndarray) -> np.ndarray:
+        """Speed + acceleration limits, like Kortex applies to joint-speed commands.
+
+        The acceleration limit scales the whole speed CHANGE by one factor, so the hand keeps moving
+        in the commanded direction.  (Clipping each joint separately bent the TCP path sideways
+        whenever joints 2-3, whose limits are 10-20x lower than the wrist's, saturated.)"""
+        if self.joint_max_speed is not None:
+            v = np.clip(v, -self.joint_max_speed, self.joint_max_speed)
+        if self.joint_max_accel is not None:
+            dv = v - self.v_cmd
+            room = self.joint_max_accel * self.dt
+            over = np.max(np.abs(dv) / room)
+            if over > 1.0:
+                v = self.v_cmd + dv / over
+        return v
 
     def step(self, a: np.ndarray, data) -> tuple[np.ndarray, float]:
         """Returns (joint position target for this control period, gripper command in ctrl units)."""
@@ -119,9 +178,13 @@ class DeltaController:
         if self.mode == "ee_delta":
             dpos = self.base_R @ (a[:3] * cc["ee_max_step"])
             cur = self.tcp.pos(data)
+            tcp_target_old, R_target_old = self.tcp_target.copy(), self.R_target.copy()
             # accumulate the target, but never let it run away from the real TCP (anti wind-up).
             # A large lead made the arm keep moving after the policy said "stop" and tore the
             # handle out of the gripper (see docs/training_issues.md).
+            # commanded motion this step after the workspace box (the velocity feedforward); the lead clip
+            # below only limits how far the target may run ahead, not how fast the policy asks to move
+            ff_step = np.clip(self.tcp_target + dpos, self.ws_low, self.ws_high) - self.tcp_target
             self.tcp_target = np.clip(self.tcp_target + dpos, cur - self.max_lead, cur + self.max_lead)
             self.tcp_target = np.clip(self.tcp_target, self.ws_low, self.ws_high)
             if self.rot_mode == "full":
@@ -130,10 +193,26 @@ class DeltaController:
                 # yaw about the base z axis, limited to +/- ee_max_yaw_deg from the nominal orientation
                 self.tcp_yaw = float(np.clip(self.tcp_yaw + a[3] * cc["ee_max_rot_step"], -self.max_yaw, self.max_yaw))
                 self.R_target = self.yaw_rotation(self.tcp_yaw) @ self.R_nominal
-            e = np.concatenate([self.tcp_target - cur,
-                                cc["ik_rot_weight"] * rotation_error(self.tcp.mat(data), self.R_target)])
-            dq = dls_step(self.tcp.jacobian(self.m, data, self.arm_dadr), e, cc["ik_damping"])
-            self.q_target = np.clip(q + self._limit_speed(dq), lo, hi)
+            if self.actuation == "velocity":
+                # feedforward = the motion the policy commanded this step; feedback = kp x lead before it
+                lin = ff_step / self.dt + self.velocity_kp * (tcp_target_old - cur)
+                ang = rotation_error(R_target_old, self.R_target) / self.dt + \
+                    self.velocity_kp * rotation_error(self.tcp.mat(data), R_target_old)
+                e = np.concatenate([lin, cc["ik_rot_weight"] * ang])
+                v = dls_step(self.tcp.jacobian(self.m, data, self.arm_dadr), e, cc["ik_damping"])
+                v = v + self._unwind / self.dt                   # pull a pushing servo target back (relax)
+                self._unwind = np.zeros(len(q))
+                self.v_cmd = self._velocity_command(v)
+                # the sim servo target integrates the speed (Kortex does the same internally); it may
+                # lead the measured joints by at most servo_max_lag (a blocked arm saturates its torque)
+                self.q_cmd = np.clip(self.q_cmd + self.v_cmd * self.dt,
+                                     q - self.servo_max_lag, q + self.servo_max_lag)
+                self.q_target = np.clip(self.q_cmd, lo, hi)
+            else:
+                e = np.concatenate([self.tcp_target - cur,
+                                    cc["ik_rot_weight"] * rotation_error(self.tcp.mat(data), self.R_target)])
+                dq = dls_step(self.tcp.jacobian(self.m, data, self.arm_dadr), e, cc["ik_damping"])
+                self.q_target = np.clip(q + self._limit_speed(dq), lo, hi)
         else:
             self.q_target = np.clip(self.q_target + a[:len(q)] * cc["joint_max_step"], lo, hi)
 

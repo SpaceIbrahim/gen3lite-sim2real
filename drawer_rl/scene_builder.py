@@ -78,8 +78,9 @@ def build_spec(cfg: dict) -> mujoco.MjSpec:
 
     tbl = scfg["table"]
     th = tbl["height"]
+    mount = float(tbl.get("robot_mount_height", 0.0))     # robot base sits this far above the table top
     base = spec.body(rcfg["base_body"])
-    base.pos = [0.0, 0.0, th]
+    base.pos = [0.0, 0.0, th + mount]
 
     # ---------- visuals ----------
     spec.visual.global_.offwidth = 1920
@@ -114,6 +115,10 @@ def build_spec(cfg: dict) -> mujoco.MjSpec:
                        pos=[lx * (sx / 2 - leg), ly * (sy / 2 - leg), (th - t) / 2],
                        size=[leg / 2, leg / 2, (th - t) / 2], rgba=tbl["rgba"],
                        contype=0, conaffinity=0)
+    if mount > 0:          # the mount plate/cylinder between the table and the robot base
+        table.add_geom(name="robot_mount", type=mujoco.mjtGeom.mjGEOM_CYLINDER,
+                       pos=[ox, oy, th + mount / 2], size=[tbl.get("robot_mount_radius", 0.0525), mount / 2, 0],
+                       rgba=[0.15, 0.15, 0.15, 1.0])
 
     # ---------- cabinet (placed in robot base frame) ----------
     dp = scfg["drawer_placement"]
@@ -125,8 +130,8 @@ def build_spec(cfg: dict) -> mujoco.MjSpec:
 
     # ---------- cameras (robot base frame, from scene.yaml) ----------
     for name, cam in (scfg.get("cameras") or {}).items():
-        pos = np.array(cam["pos"], float) + [0, 0, th]
-        fwd = np.array(cam["lookat"], float) + [0, 0, th] - pos
+        pos = np.array(cam["pos"], float) + [0, 0, th + mount]
+        fwd = np.array(cam["lookat"], float) + [0, 0, th + mount] - pos
         fwd /= np.linalg.norm(fwd)
         right = np.cross(fwd, [0, 0, 1.0])
         right /= np.linalg.norm(right)

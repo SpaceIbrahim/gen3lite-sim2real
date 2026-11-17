@@ -34,7 +34,8 @@ tcp:
 # Starting configuration.  Either give `start_qpos` explicitly (6 values, rad)
 # or leave it null and the env solves IK for `start_tcp_pos` once at start-up.
 start_qpos: null
-start_tcp_pos: [0.36, -0.18, 0.39]   # in robot base frame (m).  Was [0.35, 0, 0.42], which sat almost on the
+start_tcp_pos: [0.36, -0.18, 0.34]   # in robot base frame (m).  v8: z 0.39 -> 0.34, level with the handle
+                                   # again now that the 5 cm base mount puts the handle 5 cm lower.  Was [0.35, 0, 0.42], which sat almost on the
                                    # wrist singularity (joint 5 = -9 deg); this pose is better conditioned
 start_gripper: open                # open | closed
 start_qpos_noise: 0.05             # rad, uniform +/- noise added at reset (audit: robust to 0.1)

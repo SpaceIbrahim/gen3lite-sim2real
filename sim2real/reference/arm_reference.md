@@ -48,9 +48,9 @@ Kortex reports joint angles as 0–360°. The `0–360` column is what the Web A
 ## 4. Speeds used in simulation
 
 * cartesian_max_m_s: 0.25
-* joint_max_speed_deg_s: [57.3, 57.3, 57.3, 57.3, 57.3, 57.3]
+* joint_max_speed_deg_s: [57.3, 57.3, 57.3, 57.3, 57.3, 90.0]
 * control_rate_hz: 20
-* gripper_full_close_s (ASSUMED): 0.67
+* gripper_full_close_s (ASSUMED): 2.13
 
 ## 5. Test poses
 
@@ -76,11 +76,11 @@ Command each pose on the real arm (Web App > Angular, or `python -m sim2real.mir
 
 ### rl_start (training start pose)
 
-* Joint angles (deg): `[-57.43, -0.34, 108.87, 11.87, -59.45, 67.54]`  → Web App (0–360): `[302.57, 359.66, 108.87, 11.87, 300.55, 67.54]`
-* Tool pose (Kortex convention): x 352.0 mm, y -180.0 mm, z 390.0 mm, θx 17.19°, θy -90.0°, θz 162.81°
-* Flange centre: `[222.0, -180.0, 390.0]` mm · RL TCP: `[360.0, -180.0, 390.0]` mm
-* Elbow (joint 3 axis) centre: `[-24.4, -17.6, 523.2]` mm · wrist (joint 5 axis) centre: `[117.0, -190.9, 416.3]` mm
-* Gravity torque to hold the pose (N·m): `[0.0, 2.562, -2.17, 0.078, 0.039, 0.0]`
+* Joint angles (deg): `[-59.08, -8.24, 115.27, 18.3, -64.63, 52.34]`  → Web App (0–360): `[300.92, 351.76, 115.27, 18.3, 295.37, 52.34]`
+* Tool pose (Kortex convention): x 352.0 mm, y -180.0 mm, z 340.0 mm, θx 18.7°, θy -90.0°, θz 161.3°
+* Flange centre: `[222.0, -180.0, 340.0]` mm · RL TCP: `[360.0, -180.0, 340.0]` mm
+* Elbow (joint 3 axis) centre: `[-5.1, -49.9, 520.4]` mm · wrist (joint 5 axis) centre: `[117.0, -197.4, 362.5]` mm
+* Gravity torque to hold the pose (N·m): `[0.0, 3.229, -1.767, 0.101, 0.063, 0.0]`
 * Sim contacts: none
 
 ### home + joint_1 +30 deg
