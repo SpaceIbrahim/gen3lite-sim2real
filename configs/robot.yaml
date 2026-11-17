@@ -1,0 +1,56 @@
+# =============================================================================
+# Robot (Kinova Gen3 Lite) configuration.
+# Everything the environment needs to know about the arm lives here, so a
+# different MJCF / real-robot calibration only requires editing this file.
+# =============================================================================
+
+mjcf_path: model/kinova_gen3_lite/gen3_lite.xml   # relative to project root
+base_body: base_link
+
+arm_joints:    [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6]
+arm_actuators: [a_joint_1, a_joint_2, a_joint_3, a_joint_4, a_joint_5, a_joint_6]
+
+gripper:
+  actuator: a_gripper
+  joint: right_finger_bottom_joint     # joint read back as "gripper position"
+  open_ctrl: 0.96                      # ctrl value = fully open
+  closed_ctrl: -0.09                   # ctrl value = fully closed
+  # bodies whose geoms count as "finger" contacts for grasp detection
+  left_finger_bodies:  [left_finger_prox_link, left_finger_dist_link]
+  right_finger_bodies: [right_finger_prox_link, right_finger_dist_link]
+
+# Tool centre point used for reaching / IK
+tcp:
+  site: ee_site
+  # extra offset in the site frame (m).  +8 mm along the approach axis puts the TCP where a
+  # bar sits between the closed finger pads.  With 0 the fingertips (2.6-2.8 cm past ee_site)
+  # hit the drawer face (2.45 cm behind the bar centre) before the TCP reached the handle, so
+  # "TCP on the handle" was physically impossible (docs/training_issues.md).
+  offset: [0.0, 0.0, 0.008]
+  # Which axes of the TCP site frame point where (used to build target orientations)
+  approach_axis: z          # direction the gripper points
+  finger_axis: x            # direction the fingers open/close along
+
+# Starting configuration.  Either give `start_qpos` explicitly (6 values, rad)
+# or leave it null and the env solves IK for `start_tcp_pos` once at start-up.
+start_qpos: null
+start_tcp_pos: [0.36, -0.18, 0.39]   # in robot base frame (m).  Was [0.35, 0, 0.42], which sat almost on the
+                                   # wrist singularity (joint 5 = -9 deg); this pose is better conditioned
+start_gripper: open                # open | closed
+start_qpos_noise: 0.05             # rad, uniform +/- noise added at reset (audit: robust to 0.1)
+# IK picks the start solution closest to this posture (Kinova factory 'Home' joint angles)
+ik_preferred_qpos: [0.0, -0.28, 1.31, 0.0, -1.05, 0.0]
+
+# Hard joint limits (rad) used to clip commanded targets.  null -> take from MJCF.
+joint_limits: null
+
+# Override actuator gains / force limits here if your real arm behaves differently.
+# Example: actuator_overrides: {a_joint_2: {kp: 1000, forcerange: [-90, 90]}}
+# a_gripper kv: the MJCF ships kv=40, which is numerically unstable for the ~10 g finger links at
+# a 2 ms timestep -- the gripper chattered and JAMMED ~60 % open whatever it was commanded
+# (see docs/training_issues.md).  kv=10 closes / opens fully and stably.
+# forcerange: the MJCF allows 52 N*m on the finger joint (~1000 N squeeze), which drove the fingers
+# deep into the 1.1 cm bar and popped it out.  3 N*m is ~50 N at the fingertips. (ASSUMED --
+# check against the real Gen3 Lite gripper's grip force.)
+actuator_overrides:
+  a_gripper: {kv: 10, forcerange: [-3, 3]}
