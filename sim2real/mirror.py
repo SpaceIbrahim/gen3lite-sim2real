@@ -30,7 +30,7 @@ from scipy.spatial.transform import Rotation
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from drawer_rl.config import PROJECT_ROOT, apply_overrides  # noqa: E402
 from sim2real.arm_reference import test_poses  # noqa: E402
-from sim2real.real_arm import FakeArm, KortexArm  # noqa: E402
+from sim2real.real_arm import ArmNotInControl, FakeArm, KortexArm  # noqa: E402
 from sim2real.sim_arm import SimArm, T_from_pose, wrap  # noqa: E402
 from sim2real.trajectories import MOTIONS, check_motion  # noqa: E402
 
@@ -80,8 +80,8 @@ def confirm(args, text) -> None:
     if args.real == "fake" or args.yes:
         return
     print(text)
-    if input("Type 'go' to move the REAL arm (anything else cancels): ").strip().lower() != "go":
-        raise SystemExit("cancelled")
+    if input("Type 'go' and press Enter to move the REAL arm (anything else cancels): ").strip().lower() != "go":
+        raise SystemExit("cancelled: nothing moved")
 
 
 def save_log(cfg, tag, arrays: dict, meta: dict) -> Path:
@@ -261,6 +261,7 @@ def cmd_goto(args, cfg):
         else:
             q_t = np.radians(args.deg) if args.deg else named_pose(args.pose, sim)
         rs = real.read()
+        real.check_control()
         probs = _check_joint_path(sim, rs.q, wrap(rs.q + wrap(q_t - rs.q)), cfg)
         if probs:
             raise SystemExit("refusing: the simulated move is unsafe:\n  " + "\n  ".join(probs))
@@ -326,6 +327,7 @@ def cmd_drive(args, cfg):
                     f"joint_{j + 1} {np.degrees(a_ref[j]):.0f} > {np.degrees(a_max[j]):.0f} deg/s^2" for j in bad) +
                     "\nlower safety.speed_scale or the motion's speed")
         exc = np.degrees(np.abs(mo.q - mo.q0).max(axis=0)).round(1)
+        real.check_control()
         confirm(args, f"Motion '{mo.name}' from '{args.start}': {T:.1f} s at speed scale {scale}, "
                       f"max joint excursion {exc.tolist()} deg, joint speed cap {S['max_joint_speed_deg_s']} deg/s, "
                       f"command mode '{mode}'.")
@@ -439,8 +441,11 @@ def cmd_drive(args, cfg):
         except KeyboardInterrupt:
             abort = "stopped by user (Ctrl+C)"
             print("\n" + abort)
+        except ArmNotInControl:
+            abort = "lost control of the arm: another connection (Web App, joystick, script) took it"
+            print("\nABORT: " + abort)
         finally:
-            real.stop()
+            real.stop(quiet=True)
     print()
     meta = {"mode": "drive", "motion": mo.name, "start": args.start, "params": params, "real": args.real,
             "speed_scale": scale, "rate_hz": L["rate_hz"], "command_mode": mode, "kp": kp,
@@ -485,8 +490,11 @@ def main(argv=None):
     p.add_argument("--param", nargs="*", default=[], help="motion parameters, e.g. amp_deg=10 joints=[0,1]")
     args = ap.parse_args(argv)
     cfg = load_cfg(args.set)
-    return {"info": cmd_info, "fk-check": cmd_fk_check, "follow": cmd_follow, "goto": cmd_goto,
-            "drive": cmd_drive}[args.cmd](args, cfg)
+    try:
+        return {"info": cmd_info, "fk-check": cmd_fk_check, "follow": cmd_follow, "goto": cmd_goto,
+                "drive": cmd_drive}[args.cmd](args, cfg)
+    except ArmNotInControl as e:
+        raise SystemExit(str(e)) from None
 
 
 if __name__ == "__main__":

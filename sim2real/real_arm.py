@@ -30,7 +30,27 @@ class RealState:
 
 
 # =============================================================================== real arm
-TIMEOUT_DURATION = 20          # s, maximum wait for a Kortex action (as in the lab demo.py)
+TIMEOUT_DURATION = 20
+NOT_IN_CONTROL = (
+    "The arm refused the command: another connection is in control of it (Kortex SESSION_NOT_IN_CONTROL).\n"
+    "  * close the Kinova Web App tab, or at least leave its control / jog page;\n"
+    "  * stop any ROS driver, demo.py or other script connected to the arm;\n"
+    "  * let go of the Xbox controller;\n"
+    "then run the command again.  Read-only commands (info, fk-check, follow) work without control.")
+
+
+class ArmNotInControl(RuntimeError):
+    pass
+
+
+def _kortex(fn, *args):
+    """Call a Kortex RPC; turn 'session not in control' into a clear ArmNotInControl error."""
+    try:
+        return fn(*args)
+    except Exception as e:  # noqa: BLE001 - KServerException lives in kortex_api, imported lazily
+        if "SESSION_NOT_IN_CONTROL" in str(e) or "not in control" in str(e).lower():
+            raise ArmNotInControl(NOT_IN_CONTROL) from None
+        raise          # s, maximum wait for a Kortex action (as in the lab demo.py)
 
 
 def check_for_end_or_abort(e, Base_pb2):
@@ -90,7 +110,7 @@ class KortexArm:
         if self._conn is None:
             return
         try:
-            self.stop()
+            self.stop(quiet=True)
         finally:
             self._conn.__exit__(None, None, None)
             self._conn = None
@@ -172,7 +192,12 @@ class KortexArm:
         for joint_id, v in enumerate(np.degrees(v_rad_s)):
             s = joint_speeds.joint_speeds.add()
             s.joint_identifier, s.value, s.duration = joint_id, float(v), 0
-        self.base.SendJointSpeedsCommand(joint_speeds)
+        _kortex(self.base.SendJointSpeedsCommand, joint_speeds)
+
+    def check_control(self) -> None:
+        """Raise ArmNotInControl now (before asking to move) if another connection controls the arm.
+        Sends zero joint speeds, which does nothing to an arm at rest."""
+        self.send_joint_speeds(np.zeros(6))
 
     def send_gripper(self, g_open: float) -> None:
         """Our convention 0 closed .. 1 open -> Kortex GRIPPER_POSITION 0 open .. 1 closed."""
@@ -180,14 +205,14 @@ class KortexArm:
         finger = gripper_command.gripper.finger.add()
         gripper_command.mode = self.Base_pb2.GRIPPER_POSITION
         finger.value = float(np.clip(1.0 - g_open, 0, 1))
-        self.base.SendGripperCommand(gripper_command)
+        _kortex(self.base.SendGripperCommand, gripper_command)
 
     def _run_action(self, execute) -> bool:
         e = threading.Event()
         notification_handle = self.base.OnNotificationActionTopic(check_for_end_or_abort(e, self.Base_pb2),
                                                                   self.Base_pb2.NotificationOptions())
         try:
-            execute()
+            _kortex(execute)
             finished = e.wait(TIMEOUT_DURATION)
         finally:
             self.base.Unsubscribe(notification_handle)
@@ -232,11 +257,21 @@ class KortexArm:
             return False
         return self._run_action(lambda: self.base.ExecuteActionFromReference(a.handle))
 
-    def stop(self) -> None:
-        try:
-            self.send_joint_speeds(np.zeros(6))
-        finally:
-            self.base.Stop()
+    def stop(self, quiet: bool = False) -> None:
+        """Zero speeds + Base.Stop().  ``quiet``: on exit, report problems in one line instead of raising
+        (an arm we never controlled can't be stopped by us, and that must not hide the real error)."""
+        errors = []
+        for call in (lambda: self.send_joint_speeds(np.zeros(6)), lambda: _kortex(self.base.Stop)):
+            try:
+                call()
+            except ArmNotInControl:
+                errors.append("not in control")
+            except Exception as e:  # noqa: BLE001
+                errors.append(str(e).splitlines()[0][:120])
+        if errors and not quiet:
+            raise RuntimeError("stopping the arm failed: " + "; ".join(errors))
+        if errors and quiet and errors != ["not in control"] * len(errors):
+            print("  ! stop on exit: " + "; ".join(errors))
 
     def __enter__(self):
         self.connect()
@@ -303,6 +338,9 @@ class FakeArm:
     def send_gripper(self, g_open) -> None:
         self._g = float(g_open)
 
+    def check_control(self) -> None:
+        pass
+
     def advance(self, dt) -> None:
         """Called by the mirror loop once per period (the real arm advances by itself).
         Like Kortex: the commanded joint speed is integrated into an internal position target."""
@@ -337,7 +375,7 @@ class FakeArm:
         self.stop()
         return True
 
-    def stop(self) -> None:
+    def stop(self, quiet: bool = False) -> None:
         self._queue, self._v, self._v_cmd, self._tgt = [], np.zeros(6), np.zeros(6), None
         self.sim.hold()
 

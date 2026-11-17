@@ -96,3 +96,22 @@ def test_home_fk_info(arm):
     info = arm.info()
     assert info["hard_limits"]["joint_speed_deg_s"] == [50.0] * 6
     assert info["tool_transform"][2] == pytest.approx(0.13)
+
+
+def test_not_in_control_is_reported_clearly(arm):
+    """Lab 2026-11-17: another connection held control; the cleanup Stop() crashed with a traceback."""
+    from kortex_api.autogen.messages import Errors_pb2, Frame_pb2
+    from kortex_api.Exceptions.KServerException import KServerException
+
+    from sim2real.real_arm import ArmNotInControl
+    e = Frame_pb2.Error()
+    e.error_code, e.error_sub_code = Errors_pb2.ERROR_DEVICE, Errors_pb2.SESSION_NOT_IN_CONTROL
+    e.error_sub_string = "Failed to select joint speed: Session not in control"
+    fr = Frame_pb2.Frame()
+    fr.payload = e.SerializeToString()
+    arm.base.SendJointSpeedsCommand.side_effect = KServerException(fr)
+    arm.base.Stop.side_effect = KServerException(fr)
+    with pytest.raises(ArmNotInControl, match="Web App"):
+        arm.check_control()
+    arm._conn = mock.MagicMock()
+    arm.close()                       # must not raise
