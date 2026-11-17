@@ -1,0 +1,43 @@
+{
+ "names": [
+  "zero (all joints 0)",
+  "home (Kinova factory Home)",
+  "rl_start (training start pose)",
+  "home + joint_1 +30 deg",
+  "home + joint_2 +20 deg",
+  "home + joint_3 -30 deg",
+  "home + joint_4 +45 deg",
+  "home + joint_5 +30 deg",
+  "home + joint_6 +60 deg",
+  "random 1",
+  "random 2",
+  "random 3",
+  "random 4",
+  "random 5",
+  "random 6",
+  "random 7",
+  "random 8",
+  "random 9",
+  "random 10",
+  "random 11",
+  "random 12",
+  "random 13",
+  "random 14",
+  "random 15",
+  "random 16",
+  "random 17",
+  "random 18",
+  "random 19",
+  "random 20",
+  "measured now"
+ ],
+ "tool": [
+  0.0,
+  0.0,
+  0.12999999523162842,
+  0.0,
+  0.0,
+  90.0
+ ],
+ "real": "kortex"
+}
