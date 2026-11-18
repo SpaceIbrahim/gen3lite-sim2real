@@ -71,6 +71,17 @@ class DeltaController:
         self.joint_max_accel = None if jma is None else np.broadcast_to(np.asarray(jma, float), (len(arm_qadr),)).copy()
         self.velocity_kp = float(cc.get("velocity_kp", 2.0))          # 1/s, feedback on the target lead
         self.servo_max_lag = float(cc.get("servo_max_lag", 0.1))      # rad, sim servo target vs measured q
+        # rad: keep the servo target within this margin of where a joint moving at its COMMANDED speed would be
+        # (q + servo_tau * v).  The real arm tracks its commanded joint speed (lab 2026-11-17: speed 1.00 x); a
+        # target that ran up to servo_max_lag ahead of a blocked joint made the sim joint snap at 5-15x the
+        # commanded speed when the contact released (TCP spikes 0.8-1.2 m/s).  None = off (v8 run 1 / phases 1-2).
+        m = cc.get("servo_lead_margin")
+        self.servo_lead_margin = None if m is None else float(m)
+        # Cap the TCP speed that the commanded JOINT speeds produce at the policy's own limit (ee_max_step / dt =
+        # 0.25 m/s, the real arm's Cartesian limit).  Kortex does not apply its Cartesian limit to joint-speed
+        # commands, and the lead feedback + yaw correction could ask for more.  False = off (v8 phases 1-2).
+        self.cap_tcp_speed = bool(cc.get("cap_tcp_speed", False))
+        self.max_tcp_speed = float(cc["ee_max_step"]) / dt
         self.v_cmd = np.zeros(len(arm_qadr))                          # joint speed sent this step (rad/s)
         self._unwind = np.zeros(len(arm_qadr))                        # relax(): servo-target correction (rad)
         self.q_cmd = np.zeros(len(arm_qadr))                          # integrated speed = sim servo target
@@ -154,6 +165,15 @@ class DeltaController:
         v = np.asarray(dq, float) / self.servo_tau
         return v if self.joint_max_speed is None else np.clip(v, -self.joint_max_speed, self.joint_max_speed)
 
+    def limit_servo_target(self, q_cmd: np.ndarray, q: np.ndarray, v: np.ndarray) -> np.ndarray:
+        """Velocity actuation: where the integrated servo target may be, given the measured joints ``q`` and the
+        commanded joint speed ``v``.  Shared by the training env, the deploy sim backend and the lab-log replay."""
+        if self.servo_lead_margin is not None:
+            centre = q + self.servo_tau * v                # the lead a joint moving at speed v naturally has
+            q_cmd = np.clip(q_cmd, centre - self.servo_lead_margin, centre + self.servo_lead_margin)
+        q_cmd = np.clip(q_cmd, q - self.servo_max_lag, q + self.servo_max_lag)
+        return np.clip(q_cmd, self.q_limits[:, 0], self.q_limits[:, 1])  # never wind up past a joint limit
+
     def _velocity_command(self, v: np.ndarray) -> np.ndarray:
         """Speed + acceleration limits, like Kortex applies to joint-speed commands.
 
@@ -199,15 +219,22 @@ class DeltaController:
                 ang = rotation_error(R_target_old, self.R_target) / self.dt + \
                     self.velocity_kp * rotation_error(self.tcp.mat(data), R_target_old)
                 e = np.concatenate([lin, cc["ik_rot_weight"] * ang])
-                v = dls_step(self.tcp.jacobian(self.m, data, self.arm_dadr), e, cc["ik_damping"])
+                J = self.tcp.jacobian(self.m, data, self.arm_dadr)
+                v = dls_step(J, e, cc["ik_damping"])
+                if self.cap_tcp_speed:                           # whole-vector scaling keeps the direction
+                    sp = float(np.linalg.norm(J[:3] @ v))
+                    if sp > self.max_tcp_speed:
+                        v = v * (self.max_tcp_speed / sp)
                 v = v + self._unwind / self.dt                   # pull a pushing servo target back (relax)
                 self._unwind = np.zeros(len(q))
                 self.v_cmd = self._velocity_command(v)
+                if self.cap_tcp_speed:                           # again on the FINAL command: the acceleration
+                    sp = float(np.linalg.norm(J[:3] @ self.v_cmd))   # limit blends in the previous command
+                    if sp > self.max_tcp_speed:
+                        self.v_cmd = self.v_cmd * (self.max_tcp_speed / sp)
                 # the sim servo target integrates the speed (Kortex does the same internally); it may
                 # lead the measured joints by at most servo_max_lag (a blocked arm saturates its torque)
-                self.q_cmd = np.clip(self.q_cmd + self.v_cmd * self.dt,
-                                     q - self.servo_max_lag, q + self.servo_max_lag)
-                self.q_cmd = np.clip(self.q_cmd, lo, hi)          # never wind up past a joint limit
+                self.q_cmd = self.limit_servo_target(self.q_cmd + self.v_cmd * self.dt, q, self.v_cmd)
                 self.q_target = self.q_cmd.copy()
             else:
                 e = np.concatenate([self.tcp_target - cur,

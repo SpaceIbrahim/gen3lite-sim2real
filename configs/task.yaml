@@ -36,6 +36,12 @@ control:
   joint_max_accel: [1.0, 0.5, 0.4, 1.0, 10.0, 10.0]
   servo_max_lag: 0.15       # rad, how far the integrated servo target may run ahead of a blocked joint
                             #   (> the natural servo lag at top speed, ~0.1 rad = tau 0.1 s x 1 rad/s)
+  # Actuator fix (2026-11-18, docs/v8_actuator_fix.md): the servo target stays within this margin of where a joint
+  # moving at its COMMANDED speed would be (q + servo_tau x v).  Without it a target up to servo_max_lag ahead of a
+  # blocked joint snapped the joint at 5-15x its commanded speed on release (TCP spikes 0.8-1.2 m/s, joints driven
+  # to their limits).  0.02 rad keeps the replay of the real lab logs at 0.165 deg RMS (was 0.169).
+  servo_lead_margin: 0.02
+  cap_tcp_speed: true       # commanded joint speeds never move the TCP faster than ee_max_step / dt (0.25 m/s)
   joint_max_step: 0.05      # rad per step (joint_delta mode)
   ik_damping: 0.05          # damped-least-squares damping for ee_delta IK
   ik_rot_weight: 0.5        # how strongly orientation error is corrected
