@@ -207,7 +207,8 @@ class DeltaController:
                 # lead the measured joints by at most servo_max_lag (a blocked arm saturates its torque)
                 self.q_cmd = np.clip(self.q_cmd + self.v_cmd * self.dt,
                                      q - self.servo_max_lag, q + self.servo_max_lag)
-                self.q_target = np.clip(self.q_cmd, lo, hi)
+                self.q_cmd = np.clip(self.q_cmd, lo, hi)          # never wind up past a joint limit
+                self.q_target = self.q_cmd.copy()
             else:
                 e = np.concatenate([self.tcp_target - cur,
                                     cc["ik_rot_weight"] * rotation_error(self.tcp.mat(data), self.R_target)])

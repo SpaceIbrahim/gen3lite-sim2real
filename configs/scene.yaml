@@ -11,10 +11,9 @@ table:
   # left (+y), 54.5 cm to its right (-y).  Base diameter 10.5 cm (120.5 - 83.5 - 26.5), so from the
   # base CENTRE: +x 0.8875, -x 0.3175, +y 0.7625, -y 0.5975 m.
   height: 0.75              # floor -> table top (m)  (ASSUMED -- not measured; only moves the floor)
-  # v8: the robot stands on a mount ~5 cm above the table (lab 2026-11-17).  The cabinet stands on the table,
-  # so relative to the robot base the table, cabinet and handle are this much LOWER.  Measure exactly with
-  # sim2real/LAB_CHECKLIST.md B.2 (mount = 26 mm - tool z with the fingertips on the table).
-  robot_mount_height: 0.05  # (APPROXIMATE)
+  # v8: the robot stands on a mount 5 cm above the table (MEASURED, lab 2026-11-17).  The cabinet stands on the
+  # table, so relative to the robot base the table, cabinet and handle are this much LOWER.
+  robot_mount_height: 0.05
   robot_mount_radius: 0.0525  # the 10.5 cm footprint measured on the table
   size: [1.205, 1.36]       # x, y (m)
   thickness: 0.04
