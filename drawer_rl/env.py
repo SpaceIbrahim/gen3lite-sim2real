@@ -443,6 +443,11 @@ class DrawerEnv(gym.Env):
     # ---------------------------------------------------------------- step
     def _apply_action(self, a: np.ndarray):
         d = self.data
+        if self.controller.compliance_enabled:              # same engagement rule as the deploy loop
+            grip = float((d.qpos[self.grip_qadr] - self.grip_closed) / (self.grip_open - self.grip_closed))
+            axis_w = -d.xmat[self.drawer_body].reshape(3, 3)[:, 0]
+            self.controller.update_compliance(grip, self._w2b(self.tcp.pos(d)),
+                                              self._w2b(d.site_xpos[self.handle_site]), self.base_R.T @ axis_w)
         q_target, grip = self.controller.step(a, d)
         d.ctrl[self.arm_act] = q_target
         d.ctrl[self.grip_act] = grip

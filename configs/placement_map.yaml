@@ -1,4 +1,4 @@
-created: '2026-11-18T02:02:25'
+created: '2026-11-18T11:27:24'
 fingerprint:
   drawer_placement:
     x: 0.6
@@ -48,6 +48,10 @@ fingerprint:
   gripper_max_speed: 0.47
   servo_lead_margin: 0.02
   cap_tcp_speed: true
+  grasp_compliance:
+    enabled: true
+    max_gripper_open: 0.2
+    max_dist_m: 0.015
   side_load_friction: 0.25
 erode: 1
 xs:

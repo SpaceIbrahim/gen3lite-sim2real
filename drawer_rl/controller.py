@@ -82,6 +82,16 @@ class DeltaController:
         # commands, and the lead feedback + yaw correction could ask for more.  False = off (v8 phases 1-2).
         self.cap_tcp_speed = bool(cc.get("cap_tcp_speed", False))
         self.max_tcp_speed = float(cc["ee_max_step"]) / dt
+        # Grasp compliance (2026-11-18, docs/v8_grasp_compliance.md): while the gripper is closed on the handle the
+        # arm is soft ACROSS the drawer axis: the commanded motion keeps only its component along the axis, the
+        # gripper yaw is not driven, and every step the lead / servo push across the axis (and into the drawer) is
+        # released (relax with keep_axis), so the drawer guides the hand instead of the arm wedging the handle.
+        # The same rule runs in training and in the deploy loop.  Absent / disabled = off (v1-v8 phases 1-2).
+        gc = cc.get("grasp_compliance") or {}
+        self.compliance_enabled = bool(gc.get("enabled", False))
+        self.compliance_max_open = float(gc.get("max_gripper_open", 0.6))
+        self.compliance_max_dist = float(gc.get("max_dist_m", 0.03))
+        self.comply_axis = None                                       # world unit vector while engaged
         self.v_cmd = np.zeros(len(arm_qadr))                          # joint speed sent this step (rad/s)
         self._unwind = np.zeros(len(arm_qadr))                        # relax(): servo-target correction (rad)
         self.q_cmd = np.zeros(len(arm_qadr))                          # integrated speed = sim servo target
@@ -92,6 +102,19 @@ class DeltaController:
         self.grip_cmd = grip_open
 
     # ------------------------------------------------------------------ state
+    def update_compliance(self, gripper_open: float, tcp_b: np.ndarray, handle_b: np.ndarray,
+                          axis_b: np.ndarray) -> bool:
+        """Engage grasp compliance when the gripper is closed on the handle (base-frame inputs: what both the
+        simulator and the real robot measure).  Returns whether it is engaged."""
+        engaged = (self.compliance_enabled and gripper_open <= self.compliance_max_open
+                   and float(np.linalg.norm(np.asarray(handle_b) - np.asarray(tcp_b))) <= self.compliance_max_dist)
+        if engaged:
+            ax = self.base_R @ np.asarray(axis_b, float)
+            self.comply_axis = ax / max(np.linalg.norm(ax), 1e-9)
+        else:
+            self.comply_axis = None
+        return engaged
+
     def reset(self, data, grip_ctrl: float | None = None) -> None:
         self.tcp_target = self.tcp.pos(data).copy()
         self.R_target = self.R_nominal.copy()
@@ -100,6 +123,7 @@ class DeltaController:
         self.q_cmd = self.q_target.copy()
         self.v_cmd = np.zeros(len(self.arm_qadr))
         self._unwind = np.zeros(len(self.arm_qadr))
+        self.comply_axis = None
         if grip_ctrl is not None:
             self.grip_cmd = float(grip_ctrl)
 
@@ -197,6 +221,12 @@ class DeltaController:
         lo, hi = self.q_limits[:, 0], self.q_limits[:, 1]
         if self.mode == "ee_delta":
             dpos = self.base_R @ (a[:3] * cc["ee_max_step"])
+            if self.comply_axis is not None:                 # grasp compliance: soft across the drawer axis
+                self.relax(data, keep_axis=self.comply_axis)
+                dpos = self.comply_axis * float(dpos @ self.comply_axis)
+                a = np.array(a, dtype=float, copy=True)
+                if self.rot_mode == "yaw":
+                    a[3] = 0.0                               # the handle sets the gripper yaw while held
             cur = self.tcp.pos(data)
             tcp_target_old, R_target_old = self.tcp_target.copy(), self.R_target.copy()
             # accumulate the target, but never let it run away from the real TCP (anti wind-up).

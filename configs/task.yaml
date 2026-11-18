@@ -42,6 +42,14 @@ control:
   # to their limits).  0.02 rad keeps the replay of the real lab logs at 0.165 deg RMS (was 0.169).
   servo_lead_margin: 0.02
   cap_tcp_speed: true       # commanded joint speeds never move the TCP faster than ee_max_step / dt (0.25 m/s)
+  # Grasp compliance (2026-11-18, docs/v8_grasp_compliance.md): while the gripper is closed on the handle the arm is
+  # soft ACROSS the drawer axis -- motion only along the axis, no yaw drive, and the lead / servo push across the axis
+  # (and into the drawer) is released every step.  Wedging the handle sideways becomes physically impossible, in
+  # training and in the deploy loop (same rule).  Engages only when the bar is really in the hand.
+  grasp_compliance:
+    enabled: true
+    max_gripper_open: 0.2   # gripper this closed or more (fingers on the 1.1 cm bar read ~0.08)
+    max_dist_m: 0.015       # and the TCP within 1.5 cm of the handle centre
   joint_max_step: 0.05      # rad per step (joint_delta mode)
   ik_damping: 0.05          # damped-least-squares damping for ee_delta IK
   ik_rot_weight: 0.5        # how strongly orientation error is corrected
