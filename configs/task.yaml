@@ -34,7 +34,8 @@ control:
   # Kortex hard joint acceleration limits (rad/s^2) = 57.3, 28.6, 22.9, 57.3, 573, 573 deg/s^2.
   # The v7 policy used 5-6x more on joints 2-3 than the real arm can do.
   joint_max_accel: [1.0, 0.5, 0.4, 1.0, 10.0, 10.0]
-  servo_max_lag: 0.1        # rad, how far the integrated servo target may run ahead of a blocked joint
+  servo_max_lag: 0.15       # rad, how far the integrated servo target may run ahead of a blocked joint
+                            #   (> the natural servo lag at top speed, ~0.1 rad = tau 0.1 s x 1 rad/s)
   joint_max_step: 0.05      # rad per step (joint_delta mode)
   ik_damping: 0.05          # damped-least-squares damping for ee_delta IK
   ik_rot_weight: 0.5        # how strongly orientation error is corrected
@@ -130,8 +131,8 @@ randomization:
   drawer_offset_x: [-0.06, 0.09]
   drawer_offset_y: [-0.02, 0.02]
   validate_reachability: true   # at start-up, refuse ranges whose corners the arm cannot open
-  drawer_z: 0.02            # m (raises cabinet -> changes handle height).  v8: 0.01 -> 0.02, the base mount
-                            #   height is only known to ~1 cm until it is measured
+  drawer_z: 0.01            # m (raises cabinet -> changes handle height).  Must match the +/-1 cm height jitter
+                            #   the placement map checks (drawer_rl/placement_map.py build_map)
   drawer_yaw_deg: 0.0       # +/- range used only when drawer_yaw_range_deg is not given
   # Rotation of the drawer about the vertical axis (deg, + = counter-clockwise seen from above).
   drawer_yaw_range_deg: [-15.0, 15.0]

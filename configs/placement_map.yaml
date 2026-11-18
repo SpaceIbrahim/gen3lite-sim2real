@@ -1,4 +1,4 @@
-created: '2026-11-17T15:25:53'
+created: '2026-11-17T21:07:05'
 fingerprint:
   drawer_placement:
     x: 0.6
@@ -164,7 +164,7 @@ feasible:
   - 0
   - 0
   - 0
-  - 1
+  - 0
   - 1
   - 1
   - 1
