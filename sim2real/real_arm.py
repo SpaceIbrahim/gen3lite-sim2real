@@ -348,7 +348,7 @@ class FakeArm:
         if self._tgt is None:
             self._tgt = s.q()
         self._v = np.clip(self._v_cmd, self._v - self.a_max * dt, self._v + self.a_max * dt)
-        self._tgt = np.clip(self._tgt + self._v * dt, s.q_limits[:, 0], s.q_limits[:, 1])
+        self._tgt = s.env.controller.limit_servo_target(self._tgt + self._v * dt, s.q(), self._v)
         s.command_target(self._tgt, None)
         e = s.env
         cur = (s.d.ctrl[e.grip_act] - e.grip_closed) / (e.grip_open - e.grip_closed)

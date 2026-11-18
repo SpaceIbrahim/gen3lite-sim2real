@@ -90,6 +90,9 @@ class DrawerEnv(gym.Env):
         self.base_body = m.body(rc["base_body"]).id
         self.tcp = TCP(m, rc["tcp"]["site"], rc["tcp"]["offset"])
         self.approach_idx = "xyz".index(rc["tcp"]["approach_axis"])
+        self.finger_idx = "xyz".index(rc["tcp"]["finger_axis"])
+        self.side_idx = 3 - self.approach_idx - self.finger_idx
+        self.bar_half_len = 0.5 * float(self.cfg["drawer"]["handle"]["length"])
 
         if rc.get("joint_limits"):
             self.q_limits = np.asarray(rc["joint_limits"], float)
@@ -221,6 +224,55 @@ class DrawerEnv(gym.Env):
             raise RuntimeError(f"start_tcp_pos {rc['start_tcp_pos']} not reachable; "
                                "set robot.start_qpos explicitly or change the target")
         return best
+
+    def set_reward_weights(self, weights: dict) -> None:
+        """Training hook (phase-2 penalty ramp, scripts/train.py RewardRamp): change reward term weights."""
+        self.reward_fn.set_weights(weights)
+
+    def _near_handle_start(self) -> float | None:
+        """Training curriculum (docs/v8_training_diagnosis.md): put the OPEN gripper at a pre-grasp pose,
+        ``near_handle_dist_m`` (default 0-5 cm) in front of the handle bar along the drawer axis, +-5 mm off
+        sideways / vertically, turned to face the drawer.  The real-arm physics make lucky grasps 4-5x rarer
+        than in v6, so from the normal start the grasp was never discovered; from here closing on the bar
+        happens often and its value is learned, then carried back to the approach.
+
+        Returns the gripper yaw (rad) on success, None (normal start kept) if the pose is not reachable
+        cleanly (IK error, near a joint limit, or contact with the drawer front / an arm contact)."""
+        m, d, r = self.model, self.data, self.tc["randomization"]
+        rng = self.np_random
+        q_normal = d.qpos[self.arm_qadr].copy()
+        handle_w = d.site_xpos[self.handle_site].copy()
+        axis_w = -d.xmat[self.drawer_body].reshape(3, 3)[:, 0]              # opening direction
+        axis_b = self.base_R.T @ axis_w
+        yaw = float(np.clip(np.arctan2(-axis_b[1], -axis_b[0]), -self.controller.max_yaw, self.controller.max_yaw))
+        lo, hi = r.get("near_handle_dist_m", [0.0, 0.05])
+        side_w = self.base_R @ np.array([-axis_b[1], axis_b[0], 0.0])
+        side_w /= max(np.linalg.norm(side_w), 1e-9)
+        jit = r.get("near_handle_jitter_m", 0.005)
+        target = handle_w + axis_w * rng.uniform(lo, hi) + side_w * rng.uniform(-jit, jit) \
+            + self.base_R @ np.array([0.0, 0.0, rng.uniform(-jit, jit)])
+        R = self.controller.yaw_rotation(yaw) @ self.R_target_nominal
+        sc = self._scratch
+        sc.qpos[:] = d.qpos
+        q, err = solve_ik(m, sc, self.tcp, self.arm_qadr, self.arm_dadr, target, R, self.q_limits,
+                          q_seed=q_normal, iters=300)
+        rot_err = float(np.linalg.norm(rotation_error(self.tcp.mat(sc), R)))
+        jr = m.jnt_range[self.arm_jids]
+        margin = float(np.degrees(np.min(np.minimum(q - jr[:, 0], jr[:, 1] - q))))
+        if err > 0.003 or rot_err > 0.05 or margin < 10.0:
+            return None
+        d.qpos[self.arm_qadr] = q
+        d.ctrl[self.arm_act] = q
+        d.qvel[:] = 0
+        mujoco.mj_forward(m, d)
+        _, _, bad, finger_bad = self._contacts()
+        # fingers touching the handle bar are fine (that is the point); the drawer front or the arm are not
+        if bad or finger_bad:
+            d.qpos[self.arm_qadr] = q_normal
+            d.ctrl[self.arm_act] = q_normal
+            mujoco.mj_forward(m, d)
+            return None
+        return yaw
 
     def _validate_reachability(self):
         """Kinematic check of the corners of the drawer placement range (fast, no physics)."""
@@ -354,11 +406,20 @@ class DrawerEnv(gym.Env):
         d.qpos[self.grip_qadr] = g
         d.qpos[self.drawer_qadr] = self.np_random.uniform(*self.tc["randomization"]["initial_opening"])
         mujoco.mj_forward(m, d)
+        # training curriculum: some episodes start with the open gripper already at the handle
+        opt = options or {}
+        p_near = float(self.tc["randomization"].get("start_near_handle_prob", 0.0) or 0.0)
+        want_near = opt.get("start_near_handle", p_near > 0 and self.np_random.random() < p_near)   # no RNG draw when off
+        near_yaw = self._near_handle_start() if want_near else None
+        self.near_handle_start = near_yaw is not None
         # let the gripper / arm settle
         for _ in range(50):
             mujoco.mj_step(m, d)
 
         self.controller.reset(d, d.ctrl[self.grip_act])
+        if near_yaw is not None:        # the controller's target orientation must match the turned gripper
+            self.controller.tcp_yaw = near_yaw
+            self.controller.R_target = self.controller.yaw_rotation(near_yaw) @ self.controller.R_nominal
         r = self.tc["randomization"]
         # camera latency / dropouts for the drawer observation (see _obs)
         lo, hi = r.get("vision_delay_steps", [0, 0])
@@ -477,6 +538,10 @@ class DrawerEnv(gym.Env):
         grasped = touching and gripper_pos <= rcfg.get("grasp_max_gripper_open", 1.0)
         opening = self._opening()
         F = self._handle_force() if (gl or gr) else np.zeros(3)
+        # handle bar between the finger pads (optional shaping terms enclose / close_on_bar)
+        rel = R_tcp.T @ (handle_w - tcp_w)
+        bar_enclosed = bool(abs(rel[self.approach_idx]) < 0.012 and abs(rel[self.finger_idx]) < 0.012
+                            and abs(rel[self.side_idx]) < self.bar_half_len - 0.012)
         F_par = float(F @ open_axis_w)
         tau_frac = np.abs(d.qfrc_actuator[self.arm_dadr]) / self.arm_torque_limit
         q = d.qpos[self.arm_qadr]
@@ -498,6 +563,7 @@ class DrawerEnv(gym.Env):
             "approach_axis": R_tcp[:, self.approach_idx],
             "open_axis": open_axis_w,
             "grasped": grasped,
+            "bar_enclosed": bar_enclosed,
             "bad_contact": bad,
             "finger_bad_contact": finger_bad,
             "dt": self.dt,
@@ -554,6 +620,7 @@ class DrawerEnv(gym.Env):
 
     def _info(self, state: dict, terms: dict) -> dict:
         info = {"opening": state["opening"], "dist": state["tcp_to_handle_dist"],
+                "near_handle_start": bool(getattr(self, "near_handle_start", False)),
                 "grasped": bool(state["grasped"]), "bad_contact": bool(state["bad_contact"]),
                 "finger_bad_contact": bool(state["finger_bad_contact"]),
                 "handle_force_perp": state["handle_force_perp"], "handle_force_par": state["handle_force_par"],

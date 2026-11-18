@@ -396,7 +396,7 @@ def cmd_drive(args, cfg):
                 if mode == "deploy":
                     sim.command(dq_s, g_sim)
                 else:                   # the sim integrates its speed command into its servo target, like Kortex
-                    q_tgt_sim = q_tgt_sim + v_s * dt
+                    q_tgt_sim = sim.env.controller.limit_servo_target(q_tgt_sim + v_s * dt, q_s, v_s)
                     sim.command_target(q_tgt_sim, g_sim)
                 shadow.set_q(q_r)
                 mujoco.mj_collision(sim.m, sim.d)

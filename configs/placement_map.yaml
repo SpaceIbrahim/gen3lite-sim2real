@@ -1,4 +1,4 @@
-created: '2026-11-17T21:07:05'
+created: '2026-11-18T02:02:25'
 fingerprint:
   drawer_placement:
     x: 0.6
@@ -46,6 +46,8 @@ fingerprint:
   - 10.0
   velocity_kp: 2.0
   gripper_max_speed: 0.47
+  servo_lead_margin: 0.02
+  cap_tcp_speed: true
   side_load_friction: 0.25
 erode: 1
 xs:
@@ -164,23 +166,6 @@ feasible:
   - 0
   - 0
   - 0
-  - 0
-  - 1
-  - 1
-  - 1
-  - 1
-  - 1
-  - 1
-  - 1
-  - 1
-  - 1
-  - 1
-  - 1
-  - 1
-- - 0
-  - 0
-  - 0
-  - 0
   - 1
   - 1
   - 1
@@ -231,6 +216,23 @@ feasible:
 - - 0
   - 0
   - 0
+  - 0
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+- - 0
+  - 0
+  - 0
   - 1
   - 1
   - 1
@@ -261,7 +263,7 @@ feasible:
   - 1
   - 1
   - 1
-  - 0
+  - 1
 - - 0
   - 0
   - 0
@@ -277,7 +279,7 @@ feasible:
   - 1
   - 1
   - 1
-  - 0
+  - 1
   - 1
 - - 0
   - 0

@@ -28,6 +28,8 @@ class DrawerReward:
         "off_axis": -1, "collision": -1, "finger_contact": -1, "drawer_speed": -1,
         "handle_side_force": -1, "torque_saturation": -1, "joint_limit": -1,
         "action": -1, "action_rate": -1, "joint_vel": -1,
+        # optional shaping for the slow (2.1 s) real gripper, weight 0 = off (docs/v8_training_diagnosis.md #3)
+        "enclose": +1, "close_on_bar": +1,
     }
 
     def __init__(self, reward_cfg: dict, success_opening: float):
@@ -43,7 +45,19 @@ class DrawerReward:
         self.side_force_scale = reward_cfg.get("handle_side_force_scale_N", 10.0)
         self.torque_free = reward_cfg.get("torque_free_fraction", 0.85)
         self.joint_margin_free = np.radians(reward_cfg.get("joint_limit_free_deg", 10.0))
+        # v8 phase 2 (docs/v8_training_diagnosis.md): bound the two contact penalties per step with c*tanh(x/c).
+        # Unbounded, a forceful opening scored BELOW hovering, so fine-tuning unlearned the task; bounded, pushing
+        # less still always pays.  None = unbounded (v1-v8 phase 1).
+        cap = reward_cfg.get("penalty_soft_cap")
+        self.soft_cap = None if cap in (None, 0) else float(cap)
         self.success_opening = success_opening
+
+    def set_weights(self, weights: dict) -> None:
+        """Change term weights during training (phase-2 penalty ramp)."""
+        for k, v in weights.items():
+            if k not in self.TERMS:
+                raise KeyError(f"unknown reward term {k}")
+            self.w[k] = float(v)
 
     def __call__(self, s: dict) -> tuple[float, dict]:
         """``s`` is the state dict produced by ``DrawerEnv._task_state``."""
@@ -84,6 +98,13 @@ class DrawerReward:
             "action": float(np.sum(s["action"] ** 2)),
             "action_rate": float(np.sum((s["action"] - s["prev_action"]) ** 2)),
             "joint_vel": float(np.sum(s["joint_vel"] ** 2)),
+            # the handle bar sits between the finger pads, and how far the gripper has closed on it there
+            "enclose": float(s.get("bar_enclosed", False)),
+            "close_on_bar": float(s.get("bar_enclosed", False)) * float(np.clip(1.0 - s.get("gripper_pos", 1.0), 0.0, 1.0)),
         }
+        if self.soft_cap:
+            c = self.soft_cap
+            for k in ("handle_side_force", "torque_saturation"):
+                terms[k] = float(c * np.tanh(terms[k] / c))
         total = sum(self.TERMS[k] * self.w[k] * v for k, v in terms.items())
         return float(total), terms

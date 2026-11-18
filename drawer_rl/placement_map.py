@@ -39,7 +39,8 @@ def _fingerprint(cfg: dict) -> dict:
         "ee_max_step": cfg["task"]["control"]["ee_max_step"],
         "joint_max_speed": cfg["task"]["control"].get("joint_max_speed"),
         # v8 actuation model (velocity commands with acceleration limits, slower gripper)
-        **{k: cfg["task"]["control"][k] for k in ("actuation", "joint_max_accel", "velocity_kp", "gripper_max_speed")
+        **{k: cfg["task"]["control"][k] for k in ("actuation", "joint_max_accel", "velocity_kp", "gripper_max_speed",
+                                                   "servo_lead_margin", "cap_tcp_speed")
            if k in cfg["task"]["control"]},
         **({"side_load_friction": cfg["drawer"]["top_drawer"]["slide"]["side_load_friction"]}
            if "side_load_friction" in cfg["drawer"]["top_drawer"]["slide"] else {}),
